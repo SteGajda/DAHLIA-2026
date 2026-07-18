@@ -1,0 +1,25 @@
+# Środowiska wirtualne
+venv/
+env/
+.env
+
+# Pliki tymczasowe Pythona
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Cache testów
+.pytest_cache/
+
+# Ustawienia edytorów kodu (VS Code, PyCharm)
+.vscode/
+.idea/
+
+# Lokalne dane i bazy danych
+*.sqlite
+*.db
+*.csv
+*.xlsx
+*.pdf
+data/raw/*
+!data/raw/.gitkeep
