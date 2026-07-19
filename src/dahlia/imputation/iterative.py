@@ -10,6 +10,7 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.experimental import enable_iterative_imputer
 from sklearn.impute import IterativeImputer
 from sklearn.utils.validation import check_is_fitted
+from sklearn.linear_model import BayesianRidge
 
 from .base import BaseDAHLIAImputer
 
@@ -164,6 +165,95 @@ class RandomForestImputer(BaseDAHLIAImputer):
 
         X_filled = self.imputer_.transform(X)
         return pd.DataFrame(X_filled, columns=self.feature_names_in_, index=X.index)
+
+
+class MICEImputer(BaseDAHLIAImputer):
+    """
+    Multiple Imputation by Chained Equations (MICE) imputer.
+
+    Missing values are estimated iteratively. Each feature containing
+    missing values is modeled using the remaining features.
+    Bayesian Ridge regression is used as the estimator.
+
+    Parameters
+    ----------
+    max_iter : int, default=10
+        Maximum number of imputation iterations.
+
+    tol : float, default=1e-3
+        Convergence tolerance.
+
+    sample_posterior : bool, default=False
+        Whether to sample from the posterior predictive distribution.
+
+    random_state : int or None, default=None
+        Seed controlling randomness.
+    """
+
+    def __init__(
+        self,
+        max_iter=10,
+        tol=1e-3,
+        sample_posterior=False,
+        random_state=None,
+    ):
+        self.max_iter = max_iter
+        self.tol = tol
+        self.sample_posterior = sample_posterior
+        self.random_state = random_state
+
+    def _fit(self, X: pd.DataFrame) -> None:
+        if isinstance(self.max_iter, bool) or not isinstance(
+            self.max_iter, int
+        ):
+            raise TypeError(
+                f"max_iter must be int, got {type(self.max_iter).__name__}"
+            )
+
+        if self.max_iter < 1:
+            raise ValueError(
+                f"max_iter must be >= 1, got {self.max_iter}"
+            )
+
+        if isinstance(self.tol, bool) or not isinstance(
+            self.tol, (int, float)
+        ):
+            raise TypeError(
+                f"tol must be numeric, got {type(self.tol).__name__}"
+            )
+
+        if self.tol <= 0:
+            raise ValueError(
+                f"tol must be > 0, got {self.tol}"
+            )
+
+        if not isinstance(self.sample_posterior, bool):
+            raise TypeError(
+                "sample_posterior must be bool, "
+                f"got {type(self.sample_posterior).__name__}"
+            )
+
+        self.imputer_ = IterativeImputer(
+            estimator=BayesianRidge(),
+            max_iter=self.max_iter,
+            tol=self.tol,
+            sample_posterior=self.sample_posterior,
+            random_state=self.random_state,
+            initial_strategy="mean",
+        )
+
+        self.imputer_.fit(X)
+
+    def _transform(self, X: pd.DataFrame) -> pd.DataFrame:
+        check_is_fitted(self, attributes=["imputer_"])
+
+        X_filled = self.imputer_.transform(X)
+
+        return pd.DataFrame(
+            X_filled,
+            columns=self.feature_names_in_,
+            index=X.index,
+        )
 
 
 __all__ = [
