@@ -63,6 +63,11 @@ class RandomForestImputer(BaseDAHLIAImputer):
     is therefore required and must precede the import of
     ``IterativeImputer``.
 
+    ``RandomForestRegressor`` is intentionally run with ``n_jobs=1``
+    (single-threaded). Parallel execution (``n_jobs=-1``) introduces
+    floating-point non-determinism across runs, which is unacceptable
+    in a reproducible research setting.
+
     Examples
     --------
     >>> imputer = RandomForestImputer(n_estimators=50, max_iter=5, random_state=42)
@@ -129,7 +134,7 @@ class RandomForestImputer(BaseDAHLIAImputer):
             n_estimators=self.n_estimators,
             max_depth=self.max_depth,
             random_state=self.random_state,
-            n_jobs=-1,
+            n_jobs=1,
         )
 
         self.imputer_ = IterativeImputer(
@@ -203,6 +208,26 @@ class MICEImputer(BaseDAHLIAImputer):
         self.random_state = random_state
 
     def _fit(self, X: pd.DataFrame) -> None:
+        """
+        Fit the MICE imputer on the dataset.
+
+        Parameters
+        ----------
+        X : pandas DataFrame of shape (n_samples, n_features)
+            Validated input dataset.
+
+        Returns
+        -------
+        None
+
+        Raises
+        ------
+        TypeError
+            If max_iter is not an integer, tol is not numeric,
+            or sample_posterior is not a bool.
+        ValueError
+            If max_iter < 1 or tol <= 0.
+        """
         if isinstance(self.max_iter, bool) or not isinstance(
             self.max_iter, int
         ):
@@ -245,6 +270,25 @@ class MICEImputer(BaseDAHLIAImputer):
         self.imputer_.fit(X)
 
     def _transform(self, X: pd.DataFrame) -> pd.DataFrame:
+        """
+        Impute missing values using the trained MICE model.
+
+        Parameters
+        ----------
+        X : pandas DataFrame of shape (n_samples, n_features)
+            Dataset to impute.
+
+        Returns
+        -------
+        X_imputed : pandas DataFrame of shape (n_samples, n_features)
+            Imputed dataset with missing values replaced by
+            Bayesian Ridge predictions.
+
+        Raises
+        ------
+        sklearn.exceptions.NotFittedError
+            If the imputer has not been fitted yet.
+        """
         check_is_fitted(self, attributes=["imputer_"])
 
         X_filled = self.imputer_.transform(X)
