@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Mapping
 
+import math
 import numpy as np
 import pandas as pd
 from sklearn.metrics import mean_absolute_error, root_mean_squared_error
@@ -83,19 +84,32 @@ def build_display_ticks(
     precision: float,
     max_labels: int = 9,
 ) -> tuple[float, ...]:
-    """Return the shared, readable labels used by slider and colorbar."""
-    total_steps = int(round((maximum - minimum) / precision))
-    if total_steps <= max_labels - 1:
-        indices = list(range(total_steps + 1))
-    else:
-        indices = sorted(
-            set(np.linspace(0, total_steps, max_labels).round().astype(int).tolist())
-        )
+    """Return evenly spaced tick labels aligned to nice multiples of precision.
+
+    Iterates over multipliers (1, 2, 5, 10, …) of *precision* and picks the
+    smallest one whose tick count does not exceed *max_labels*.  This ensures
+    the slider and the colorbar always show clean, evenly spaced labels.
+    """
     digits = precision_digits(precision)
-    return tuple(
-        round(minimum + index * precision, digits)
-        for index in indices
-    )
+    span = round(maximum - minimum, digits + 4)
+    if span <= 0:
+        return (round(minimum, digits),)
+
+    for multiplier in (1, 2, 5, 10, 20, 50, 100, 200, 500, 1000):
+        step = round(multiplier * precision, digits + 4)
+        # First tick: smallest multiple of step that is >= minimum.
+        first = math.ceil(round(minimum / step, 10)) * step
+        first = round(first, digits)
+        ticks: list[float] = []
+        t = first
+        while round(t, digits) <= round(maximum, digits) + 1e-9:
+            ticks.append(round(t, digits))
+            t = round(t + step, digits)
+        if ticks and len(ticks) <= max_labels:
+            return tuple(ticks)
+
+    # Fallback: just the two endpoints.
+    return (round(minimum, digits), round(maximum, digits))
 
 
 def prepare_experiment(
