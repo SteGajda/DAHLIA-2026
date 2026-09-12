@@ -17,6 +17,7 @@ from dahlia.services.experiment import precision_digits
 
 
 def _tick_markup(experiment: Any) -> str:
+    """Return an HTML string of labelled tick marks for the slider range."""
     digits = precision_digits(experiment.config.precision)
     items = "".join(
         f'<span class="dahlia-tick">{escape(f"{value:.{digits}f}")}</span>'
@@ -26,6 +27,7 @@ def _tick_markup(experiment: Any) -> str:
 
 
 def _figure_payload(experiment: Any, predicted_value: float) -> dict:
+    """Serialise the experiment figure to a Plotly JSON dict ready for NiceGUI."""
     payload = build_experiment_figure(
         experiment,
         predicted_value,
@@ -35,6 +37,12 @@ def _figure_payload(experiment: Any, predicted_value: float) -> dict:
 
 
 def render_experiment(controller: Any) -> None:
+    """Render the active annotation step: chart, slider, number input and controls.
+
+    The screen is intentionally isolated from the sidebar so the annotator
+    cannot navigate away mid-experiment; only the top-right Restart link
+    exits the flow (via a confirmation dialog).
+    """
     experiment = controller.experiment
     assert experiment is not None
     digits = precision_digits(experiment.config.precision)
@@ -124,8 +132,7 @@ def render_experiment(controller: Any) -> None:
                             .props(
                                 "outlined dense "
                                 f"type=number min={experiment.value_min} "
-                                f"max={experiment.value_max} "
-                                f"step={experiment.config.precision}"
+                                f"max={experiment.value_max}"
                             )
                             .classes("dahlia-number")
                         )
@@ -135,9 +142,9 @@ def render_experiment(controller: Any) -> None:
                         )
                     ui.space()
                     ui.button(
-                        "Restart",
-                        on_click=restart_dialog.open,
-                    ).classes("dahlia-secondary-btn px-5")
+                        "Reset value",
+                        on_click=controller.reset_current_value,
+                    ).props("no-caps").classes("dahlia-secondary-btn px-3")
                     next_text = (
                         "Finish experiment"
                         if experiment.current_step == TOTAL_STEPS

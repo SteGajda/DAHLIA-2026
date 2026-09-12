@@ -39,7 +39,16 @@ def compute_projection(
     projection: str,
     seed: int,
 ) -> pd.DataFrame:
-    """Compute stable x/y coordinates once for the whole experiment."""
+    """Compute stable x/y coordinates once for the whole experiment.
+
+    Notes
+    -----
+    UMAP is run with ``n_jobs=1`` (single-threaded).  When ``random_state``
+    is set, UMAP internally forces single-thread execution anyway and emits a
+    ``UserWarning`` if ``n_jobs != 1``.  Setting it explicitly suppresses the
+    warning and mirrors the reproducibility constraint applied to
+    ``RandomForestRegressor`` in the imputation layer.
+    """
     matrix = normalized_reference_matrix(df, config)
     key = projection.lower()
 
@@ -50,7 +59,7 @@ def compute_projection(
     elif key == "umap":
         try:
             from umap.umap_ import UMAP
-        except ImportError as exc:  # pragma: no cover - dependency checked at runtime
+        except ImportError as exc:
             raise ProjectionError(
                 "UMAP is unavailable. Install the 'umap-learn' dependency."
             ) from exc
@@ -58,6 +67,7 @@ def compute_projection(
             n_components=2,
             init="random",
             random_state=seed,
+            n_jobs=1,
         ).fit_transform(matrix)
     else:
         raise ProjectionError(f"Unknown projection: {projection}")

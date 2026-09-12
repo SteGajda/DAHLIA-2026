@@ -9,7 +9,6 @@ import plotly.graph_objects as go
 
 from dahlia.services.experiment import PreparedExperiment, precision_digits
 
-# The exact plasma stops used by the approved Figma concept.
 PLASMA_FIGMA: Final[list[list[float | str]]] = [
     [0.0, "rgb(13,8,135)"],
     [1 / 7, "rgb(84,2,163)"],
@@ -23,6 +22,11 @@ PLASMA_FIGMA: Final[list[list[float | str]]] = [
 
 
 def _axis_range(values: np.ndarray) -> list[float]:
+    """Return a padded [min, max] range for a Plotly axis.
+
+    Adds 7 % of the data span as padding on each side so points near
+    the edge of the scatter are not clipped.
+    """
     minimum = float(np.min(values))
     maximum = float(np.max(values))
     span = maximum - minimum
@@ -31,6 +35,7 @@ def _axis_range(values: np.ndarray) -> list[float]:
 
 
 def _tick_text(experiment: PreparedExperiment) -> list[str]:
+    """Format display tick values to the dataset's decimal precision."""
     digits = precision_digits(experiment.config.precision)
     return [f"{value:.{digits}f}" for value in experiment.display_ticks]
 
@@ -39,6 +44,28 @@ def build_experiment_figure(
     experiment: PreparedExperiment,
     predicted_value: float,
 ) -> go.Figure:
+    """Build the Plotly scatter figure for the active annotation step.
+
+    Renders two traces: one for all currently observed points (coloured
+    by their known target value) and one for the single active point
+    whose target the annotator is estimating (coloured by the current
+    slider/input value).  An arrow annotation marks the active point.
+
+    Parameters
+    ----------
+    experiment:
+        Prepared experiment state, including coordinates, config and
+        the current annotation index.
+    predicted_value:
+        The annotator's current guess for the active point's target
+        value, used to colour the active marker and populate its tooltip.
+
+    Returns
+    -------
+    go.Figure
+        A configured Plotly Figure ready to be serialised and passed to
+        a NiceGUI ``ui.plotly`` element.
+    """
     cfg = experiment.config
     target = cfg.incomplete_column
     current = experiment.current_index

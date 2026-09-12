@@ -1,1 +1,1 @@
-"""The three screens included in the DAHLIA 1.1 MVP."""
+"""Screen render functions for the DAHLIA desktop application."""

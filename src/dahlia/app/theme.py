@@ -258,6 +258,168 @@ body.body--dark { background: var(--dahlia-surface) !important; }
   .dahlia-chart-frame { height: 390px; }
   .dahlia-experiment-main { padding-top: 8px; }
 }
+
+/* ── Sidebar layout (all screens except Active Experiment) ── */
+
+.dahlia-page-row {
+  display: flex !important;
+  flex-direction: row !important;
+  flex-wrap: nowrap !important;
+  height: 100vh;
+  width: 100%;
+  overflow: hidden;
+  align-items: stretch;
+}
+
+.dahlia-sidebar {
+  display: flex !important;
+  flex-direction: column !important;
+  width: 180px;
+  min-width: 180px;
+  max-width: 180px;
+  flex-shrink: 0;
+  height: 100%;
+  border-right: 1px solid var(--dahlia-border);
+  background: var(--dahlia-subtle);
+  overflow: hidden;
+}
+
+.dahlia-sidebar-top {
+  padding: 16px 14px 12px;
+  border-bottom: 1px solid var(--dahlia-border);
+}
+
+.dahlia-sidebar-nav { flex: 1; padding: 8px 0; }
+.dahlia-sidebar-bottom { padding: 6px 0; border-top: 1px solid var(--dahlia-border); }
+
+.dahlia-nav-item {
+  width: 100% !important;
+  padding: 9px 14px !important;
+  font-size: 14px !important;
+  color: var(--dahlia-text) !important;
+  background: transparent !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  text-transform: none !important;
+  justify-content: flex-start !important;
+  min-height: unset !important;
+  transition: background 0.12s;
+}
+/* Quasar q-btn__content defaults to justify-center — override to left */
+.dahlia-nav-item .q-btn__content {
+  justify-content: flex-start !important;
+  width: 100% !important;
+}
+.dahlia-nav-item:hover { background: rgba(107, 93, 211, 0.07) !important; }
+.dahlia-nav-item.active {
+  background: var(--dahlia-primary-soft) !important;
+  color: var(--dahlia-primary) !important;
+  font-weight: 520 !important;
+}
+
+/* ── Connection / sync badges ─────────────────────────────────── */
+.dahlia-status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 20px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  white-space: nowrap;
+}
+.dahlia-status-online  { background: #d4f7e8; color: #1a7a4a; }
+.dahlia-status-offline { background: #f0f0f4; color: #6b6b75; }
+.dahlia-sync-local   { background: #f0f0f4; color: #555560; }
+.dahlia-sync-pending { background: #fff0dc; color: #8a5700; }
+.dahlia-sync-synced  { background: #d4f7e8; color: #1a7a4a; }
+.dahlia-sync-failed  { background: #ffe4e6; color: #9f2f39; }
+
+/* ── Content column right of sidebar ──────────────────────────── */
+.dahlia-content-page {
+  display: flex !important;
+  flex-direction: column !important;
+  flex: 1 1 0 !important;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.dahlia-content-header {
+  width: 100%;
+  min-height: 53px;
+  padding: 0 28px;
+  border-bottom: 1px solid var(--dahlia-border);
+  background: #fff;
+  flex-shrink: 0;
+  align-items: center;
+}
+
+.dahlia-content-main { flex: 1; overflow: auto; padding: 36px; }
+
+/* setup-main and results-main fill remaining height and scroll if needed */
+.dahlia-setup-main   { flex: 1 !important; min-height: 0; overflow: auto; }
+.dahlia-results-main { flex: 1 !important; min-height: 0; overflow: auto; }
+
+/* ── Profile / auth ───────────────────────────────────────────── */
+.dahlia-profile-card {
+  width: min(460px, calc(100vw - 220px));
+  padding: 30px;
+  border: 1px solid var(--dahlia-border);
+  border-radius: 9px;
+  box-shadow: 0 12px 36px rgba(20, 20, 30, .06);
+  background: #fff;
+}
+
+.dahlia-back-link {
+  font-size: 13px !important;
+  color: var(--dahlia-muted) !important;
+  text-transform: none !important;
+  box-shadow: none !important;
+  background: transparent !important;
+  padding: 0 !important;
+  min-height: unset !important;
+  letter-spacing: 0 !important;
+}
+.dahlia-back-link:hover { color: var(--dahlia-text) !important; }
+
+.dahlia-checkbox .q-checkbox__label { font-size: 14px; }
+.dahlia-checkbox-consent .q-checkbox__label { font-size: 13px; color: var(--dahlia-muted); }
+
+.dahlia-profile-info-label {
+  font-size: 12px;
+  color: var(--dahlia-muted);
+  font-weight: 500;
+  min-width: 140px;
+}
+
+/* ── My Results ───────────────────────────────────────────────── */
+.dahlia-my-results-table {
+  width: 100%;
+  border: 1px solid var(--dahlia-border);
+  border-radius: 7px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.dahlia-export-btn {
+  border: 1px solid var(--dahlia-border) !important;
+  border-radius: 5px !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  letter-spacing: .06em !important;
+  text-transform: uppercase !important;
+  box-shadow: none !important;
+  min-height: 30px !important;
+  padding: 0 10px !important;
+  color: var(--dahlia-muted) !important;
+  background: white !important;
+}
+.dahlia-export-btn.active {
+  background: var(--dahlia-primary) !important;
+  color: white !important;
+  border-color: var(--dahlia-primary) !important;
+}
 """
 
 ESCAPE_AND_EXIT_GUARD = r"""

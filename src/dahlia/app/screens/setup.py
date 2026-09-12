@@ -6,15 +6,12 @@ from typing import Any
 
 from nicegui import ui
 
-from dahlia.app.components.branding import brand
+from dahlia.app.components.layout import sidebar_page
 from dahlia.services.config import DATASETS, MAX_SEED, NA_FRACTIONS, PROJECTIONS
 
 
 def render_setup(controller: Any, error_message: str | None = None) -> None:
-    with ui.column().classes("dahlia-setup-page gap-0"):
-        with ui.row().classes("dahlia-header items-center"):
-            brand()
-
+    with sidebar_page(controller, "setup"):
         with ui.element("main").classes("dahlia-setup-main"):
             with ui.column().classes("dahlia-card gap-0"):
                 ui.label("Experiment Setup").classes("dahlia-title")

@@ -4,11 +4,13 @@ DAHLIA 1.1 jest desktopową aplikacją do eksperymentów human-in-the-loop zwią
 
 ## Zakres MVP
 
-Aplikacja zawiera dokładnie trzy ekrany:
+Aplikacja zawiera ekrany:
 
 1. `Experiment Setup`
 2. `Active Experiment`
 3. `Results Summary`
+4. `My Results` (lokalne wyniki i eksport CSV)
+5. `Profile` / `Login` / `Register`
 
 W MVP dostępny jest zbiór `iris`, frakcje braków `0.1`, `0.2`, `0.3` oraz projekcje `tsne`, `pca`, `umap`.
 
@@ -22,17 +24,27 @@ scripts/
   build_windows.ps1            budowa pliku EXE
 src/dahlia/
   app/
-    components/                wykres i współdzielone elementy UI
-    screens/                   trzy ekrany MVP
-    controller.py              stan i przejścia między ekranami
+    components/
+      branding.py              logotyp i wersja
+      chart.py                 wykres Plotly eksperymentu
+      layout.py                helper układu z sidebar
+      sidebar.py               nawigacja boczna
+    screens/
+      setup.py                 konfiguracja eksperymentu
+      experiment.py            aktywny eksperyment
+      results.py               podsumowanie wyników
+      my_results.py            lokalne wyniki i eksport
+      profile.py               profil, logowanie, rejestracja
+    controller.py              stan i nawigacja między ekranami
     main.py                    natywne okno desktopowe
-    theme.py                   styl zgodny z Figmą
-  datasets/                    wybór braków i 15 punktów
-  imputation/                  istniejące metody imputacji
+    theme.py                   styl zgodny z konceptem w Figmie
+  datasets/
+    na_generator.py            deterministyczny wybór braków i punktów
+  imputation/                  metody imputacji
   services/
     config.py                  stałe datasetu i eksperymentu
     data.py                    wczytywanie oraz walidacja CSV
-    projection.py              PCA, t-SNE i UMAP bez leaka
+    projection.py              projekcje PCA, t-SNE i UMAP
     experiment.py              przygotowanie, metody i metryki
 tests/                         testy logiki naukowej
 run_app.py                     główny plik uruchomieniowy
@@ -116,4 +128,5 @@ Budowanie `.exe` należy wykonywać na Windows. Pozostałe systemy są traktowan
 - Suwak, pole liczbowe i kolor punktu mają jedno wspólne źródło wartości.
 - Metody działają w tle podczas anotacji.
 - Błąd którejkolwiek metody przerywa eksperyment.
-- Wyniki nie są zapisywane ani eksportowane.
+- Wyniki są zapisywane lokalnie po zakończeniu eksperymentu (tylko na czas aktywnej sesji) i mogą być
+  wyeksportowane do pliku CSV (metryki lub odpowiedzi annotatora).

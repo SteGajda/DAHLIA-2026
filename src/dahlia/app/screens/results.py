@@ -6,10 +6,11 @@ from typing import Any
 
 from nicegui import ui
 
-from dahlia.app.components.branding import brand
+from dahlia.app.components.layout import sidebar_page
 
 
 def render_results(controller: Any) -> None:
+    """Results Summary screen shown after completing an experiment."""
     assert controller.results is not None
 
     mae_vals = [float(row.MAE) for row in controller.results.itertuples(index=False)]
@@ -48,13 +49,18 @@ def render_results(controller: Any) -> None:
         },
     ]
 
-    with ui.column().classes("dahlia-setup-page gap-0"):
-        with ui.row().classes("dahlia-header items-center"):
-            brand()
-
+    with sidebar_page(controller, "setup", "Results Summary"):
         with ui.element("main").classes("dahlia-results-main"):
             with ui.column().classes("dahlia-results gap-0"):
+                # Success indicator
+                with ui.row().classes("items-center gap-2 mb-3"):
+                    ui.icon("check_circle").classes("text-positive")
+                    ui.label("Results saved locally").classes(
+                        "text-sm text-positive font-medium"
+                    )
+
                 ui.label("Results Summary").classes("dahlia-title")
+
                 table = (
                     ui.table(
                         columns=columns,
@@ -83,8 +89,33 @@ def render_results(controller: Any) -> None:
                     </q-td>
                     """,
                 )
-                ui.button(
-                    "Start new experiment",
-                    on_click=controller.start_new_experiment,
-                ).classes("dahlia-primary-btn w-full")
 
+                # Action buttons
+                def _export_current() -> None:
+                    """Export metrics + answers CSVs for the just-finished experiment."""
+                    if not controller.local_experiments:
+                        return
+                    current = [controller.local_experiments[-1]]
+                    controller.export_local_csv_metrics(current)
+                    controller.export_local_csv_answers(current)
+
+                ui.button(
+                    "Export this experiment",
+                    on_click=_export_current,
+                ).props("outline no-caps").classes("dahlia-secondary-btn w-full mb-2")
+
+                if controller.current_user is not None:
+                    ui.button(
+                        "Upload to database",
+                        on_click=lambda: ui.notify(
+                            "Database upload is not yet implemented.",
+                            type="info",
+                        ),
+                    ).props("outline no-caps").classes(
+                        "dahlia-secondary-btn w-full mb-2"
+                    )
+
+                ui.button(
+                    "Back to main menu",
+                    on_click=lambda: controller.show_setup(reset_defaults=False),
+                ).classes("dahlia-primary-btn w-full")
