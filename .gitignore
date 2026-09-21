@@ -1,5 +1,6 @@
 # Środowiska wirtualne
 venv/
+.venv/
 env/
 .env
 
@@ -10,18 +11,23 @@ __pycache__/
 
 # Cache testów
 .pytest_cache/
+.coverage
+htmlcov/
 
-# Ustawienia edytorów kodu (VS Code, PyCharm)
+# Ustawienia edytorów kodu
 .vscode/
 .idea/
 
-# Lokalne dane i bazy danych
+# Lokalne bazy i arkusze
 *.sqlite
 *.db
-*.csv
 *.xlsx
 *.pdf
-data/raw/*
-!data/raw/.gitkeep
+
+# Wyniki budowania aplikacji
+build/
+dist/
+*.spec
+
 # Metadane instalacji pakietu Python
 *.egg-info/
