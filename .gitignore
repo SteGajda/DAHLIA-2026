@@ -1,33 +1,37 @@
-# Środowiska wirtualne
+# Virtual environments
 venv/
 .venv/
 env/
 .env
 
-# Pliki tymczasowe Pythona
+# Python temporary files
 __pycache__/
 *.py[cod]
 *$py.class
 
-# Cache testów
+# Test cache
 .pytest_cache/
 .coverage
 htmlcov/
 
-# Ustawienia edytorów kodu
+# Editor settings
 .vscode/
 .idea/
 
-# Lokalne bazy i arkusze
+# Local databases and spreadsheets
 *.sqlite
 *.db
 *.xlsx
 *.pdf
 
-# Wyniki budowania aplikacji
+# Build artifacts
 build/
 dist/
 *.spec
 
-# Metadane instalacji pakietu Python
+# Python package metadata
 *.egg-info/
+
+# Backend — secrets and local databases
+backend/.env
+backend/dahlia_dev.db
