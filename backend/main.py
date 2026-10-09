@@ -14,13 +14,22 @@ Database initialisation strategy
   **Alembic commands must never target SQLite.**
 """
 
+import logging
+import logging.config
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.api.v1.router import router as api_v1_router
 from app.core.config import get_settings
 from app.db.base import Base
 from app.db.session import engine
+
+# Logging — ensure INFO messages (including mock-SMTP tokens) appear in console
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",
+)
 
 
 # Application lifespan
@@ -42,14 +51,17 @@ app = FastAPI(
     title="DAHLIA API",
     description=(
         "REST API for the DAHLIA human-in-the-loop imputation experiment "
-        "platform.  Handles authentication, RBAC, experiment synchronisation "
-        "and predefined imputation set management."
+        "platform.  Handles authentication, role-based access control (RBAC), "
+        "experiment synchronisation and predefined imputation set management."
     ),
-    version="0.1.0",
+    version="0.2.0",
     docs_url="/docs",
     redoc_url="/redoc",
     lifespan=lifespan,
 )
+
+# Routers
+app.include_router(api_v1_router, prefix="/api/v1")
 
 
 # Liveness endpoint
