@@ -1,25 +1,13 @@
 """Pytest fixtures shared across all runtime tests.
 
-``starlette.testclient`` accesses ``anyio.abc.BlockingPortal`` at module-level
-(line 53), which triggers a ``DeprecationWarning`` from anyio 4.x.  To suppress
-it, ``TestClient`` must **not** be imported at module level in this file.
-Instead, the import is deferred to inside the ``client`` fixture body, which
-runs after all warning filters (``pyproject.toml`` + ``pytest_configure``) are
-already active.
-
 Fixtures
 --------
 ``sqlite_engine``
-    Fresh SQLite in-memory engine with ``schema_translate_map={"dahlia": None}``
-    applied at engine level.  Every connection (DDL, ORM queries, DML) gets
-    the map automatically.  Tables are created via ``Base.metadata.create_all()``.
-
+    Fresh SQLite in-memory engine (with ``dahlia`` schema prefix stripped).
 ``sqlite_session``
     A SQLAlchemy Session bound to the ``sqlite_engine`` fixture.
-
 ``test_app``
     The FastAPI application with ``get_db`` overridden to use the test engine.
-
 ``client``
     Starlette's ``TestClient`` wrapping ``test_app``.
 """
@@ -31,12 +19,9 @@ import warnings
 
 def pytest_configure(config):  # noqa: ARG001
     """Register warning filters before any test module is imported.
-
-    ``starlette.testclient`` emits an anyio ``DeprecationWarning`` at line 53
-    of the module body (i.e., at import time).  pytest processes
-    ``filterwarnings`` from ``pyproject.toml`` after collecting test files,
-    which is already too late.  A ``pytest_configure`` hook runs first,
-    before any test module import, so the filter is active in time.
+    
+    This suppresses a known DeprecationWarning from the anyio library
+    triggered by FastAPI's TestClient.
     """
     warnings.filterwarnings(
         "ignore",
@@ -48,16 +33,14 @@ def pytest_configure(config):  # noqa: ARG001
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-# NOTE: starlette.testclient is intentionally NOT imported here at module level.
-# See the module docstring for why — deferred import in client() fixture below.
+# NOTE: starlette.testclient is intentionally imported inside the client() fixture
+# below to prevent anyio DeprecationWarnings from leaking during test collection.
 
 from app.db.base import Base
 from app.db.session import get_db
 
 
-# ---------------------------------------------------------------------------
 # SQLite in-memory engine — fully isolated per test
-# ---------------------------------------------------------------------------
 @pytest.fixture()
 def sqlite_engine():
     """Create a fresh SQLite in-memory engine with all ORM tables.
@@ -67,9 +50,12 @@ def sqlite_engine():
     DML statements transparently strip the ``dahlia.`` schema prefix.
     This mirrors the production session.py behaviour for SQLite.
     """
+    from sqlalchemy.pool import StaticPool
+    
     _engine = create_engine(
         "sqlite+pysqlite:///:memory:",
         connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
     )
     _engine = _engine.execution_options(schema_translate_map={"dahlia": None})
     Base.metadata.create_all(bind=_engine)
@@ -92,9 +78,7 @@ def sqlite_session(sqlite_engine):
         db.close()
 
 
-# ---------------------------------------------------------------------------
 # FastAPI test application
-# ---------------------------------------------------------------------------
 @pytest.fixture()
 def test_app(sqlite_engine):
     """Return the FastAPI app with ``get_db`` overridden to use the test engine.
@@ -136,7 +120,8 @@ def client(test_app):
     ``starlette.testclient`` is loaded only after all warning filters are
     active, preventing the anyio DeprecationWarning from leaking through.
     """
-    from starlette.testclient import TestClient  # deferred — see module docstring
+    # Deferred import to suppress warnings
+    from starlette.testclient import TestClient
 
     with TestClient(test_app, raise_server_exceptions=True) as c:
         yield c
