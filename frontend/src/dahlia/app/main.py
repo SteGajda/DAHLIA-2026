@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import os
+import sys
 from multiprocessing import freeze_support
+from typing import Any
 
 from nicegui import app, ui
 
@@ -30,20 +33,31 @@ def root() -> None:
     controller.show_setup(reset_defaults=True)
 
 
-def main() -> None:
+def main(*, native: bool | None = None, port: int | None = None) -> None:
     freeze_support()
-    ui.run(
-        root=root,
-        title=f"DAHLIA {APP_VERSION}",
-        native=True,
-        fullscreen=True,
-        dark=False,
-        language="en-US",
-        reload=False,
-        show=False,
-        show_welcome_message=False,
+    is_native = (
+        native
+        if native is not None
+        else ("--browser" not in sys.argv and os.getenv("DAHLIA_NATIVE", "1") == "1")
     )
+    # NiceGUI internal webview must not use port 8000 (reserved for backend API)
+    app_port = port or int(os.getenv("DAHLIA_PORT", "8080") or "8080")
+    run_kwargs: dict[str, Any] = {
+        "title": f"DAHLIA {APP_VERSION}",
+        "native": is_native,
+        "dark": False,
+        "language": "en-US",
+        "reload": False,
+        "show": False,
+        "show_welcome_message": False,
+        "port": app_port,
+    }
+    if is_native:
+        run_kwargs["fullscreen"] = True
+
+    ui.run(root=root, **run_kwargs)
 
 
 if __name__ == "__main__":
     main()
+
