@@ -330,9 +330,19 @@ class TestRequestRole:
         assert resp.status_code == 201
         assert resp.json()["request_id"] > 0
 
-    def test_user_can_request_researcher(self, client):
+    def test_user_cannot_request_researcher_directly(self, client):
         headers = _auth_headers(client)
         resp = client.post(f"{_BASE}/request-role", json={"requested_role": "RESEARCHER"}, headers=headers)
+        assert resp.status_code == 422
+
+    def test_user_plus_can_request_researcher(self, client, sqlite_session):
+        _auth_headers(client)
+        user = sqlite_session.query(AppUser).filter_by(email="alice@example.com").first()
+        user.role_code = "USER_PLUS"
+        sqlite_session.commit()
+        tokens = _login(client)
+        h = {"Authorization": f"Bearer {tokens['access_token']}"}
+        resp = client.post(f"{_BASE}/request-role", json={"requested_role": "RESEARCHER"}, headers=h)
         assert resp.status_code == 201
 
     def test_cannot_request_developer_role_returns_422(self, client):
