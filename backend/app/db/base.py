@@ -11,3 +11,8 @@ from app.db.base_class import Base  # noqa: F401
 # Model imports — keep this section in sync with app/models/
 # Alembic autogenerate will only detect tables whose models are imported here.
 from app.models.user import AppUser, RefreshToken, RoleRequest  # noqa: F401
+
+from app.models.experiment import (
+    Dataset, PredefinedSet, PredefinedSetPoint, Experiment,
+    ExperimentPoint, PointPrediction, ExperimentResult,
+)

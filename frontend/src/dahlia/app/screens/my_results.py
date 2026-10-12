@@ -41,6 +41,23 @@ def render_my_results(controller: Any) -> None:
                 "or uploaded to the database."
             ).classes("text-sm dahlia-muted mb-5")
 
+            unassigned = controller.get_unassigned_experiment_uids()
+            if unassigned:
+                ui.label(f"{len(unassigned)} offline result(s) are not assigned to an account.").classes(
+                    "text-sm dahlia-muted mb-2"
+                )
+                if controller.current_user and controller.current_user.get("user_id") is not None:
+                    ui.button("Assign offline results to my account",
+                              on_click=lambda: _open_assignment_dialog(controller)).classes(
+                        "dahlia-secondary-btn mb-4"
+                    )
+                else:
+                    ui.label("Log in to assign these results before uploading.").classes("text-sm dahlia-muted mb-4")
+            if any(exp.get("payload", {}).get("payload_schema_version", 1) != 2 for exp in experiments):
+                ui.label("Older results remain available for viewing and export. "
+                         "Only experiments saved with complete predictions can be uploaded.").classes(
+                             "text-sm dahlia-muted mb-4")
+
             # Export controls
             with ui.row().classes("items-center gap-2 mb-5 flex-wrap"):
                 format_select = (
@@ -83,7 +100,7 @@ def render_my_results(controller: Any) -> None:
 
                 ui.space()
 
-                async def _on_upload_click() -> None:
+                def _on_upload_click() -> None:
                     if not controller.current_user:
                         ui.notify(
                             "Log in to upload your experiments to the database.",
@@ -103,30 +120,41 @@ def render_my_results(controller: Any) -> None:
                         )
                         return
 
-                    synced, failed = await controller.sync_local_experiments()
-                    if synced > 0 and failed == 0:
-                        ui.notify(
-                            f"Successfully uploaded {synced} experiment(s)!",
-                            type="positive",
-                        )
-                    elif synced > 0 and failed > 0:
-                        ui.notify(
-                            f"Uploaded {synced} experiment(s), {failed} failed.",
-                            type="warning",
-                        )
-                    elif failed > 0:
-                        ui.notify(
-                            f"Upload failed for {failed} experiment(s).",
-                            type="negative",
-                        )
-                    else:
-                        ui.notify(
-                            "All local experiments are already synced.",
-                            type="info",
-                        )
-                    controller.show_my_results()
+                    candidates = controller.get_upload_candidates()
+                    if not candidates:
+                        ui.notify("No complete, unsynced experiments are assigned to this account.", type="info")
+                        return
+                    owner = controller.current_user["user_id"]
+                    confirmed_uids = [exp["experiment_uid"] for exp in candidates]
+                    dialog = ui.dialog()
 
-                ui.button(
+                    async def _upload_confirmed():
+                        dialog.close()
+                        upload_button.disable()
+                        try:
+                            synced, failed = await controller.sync_local_experiments(
+                                experiment_uids=confirmed_uids, expected_user_id=owner,
+                            )
+                            if failed:
+                                ui.notify(f"Uploaded {synced}; failed {failed}. "
+                                          f"{controller.last_sync_error or ''}", type="warning")
+                            elif synced:
+                                ui.notify(f"Successfully uploaded {synced} experiment(s).", type="positive")
+                            else:
+                                ui.notify("No experiments uploaded. Check the current account.", type="info")
+                        finally:
+                            controller.show_my_results()
+
+                    with dialog, ui.card().classes("dahlia-modal-card gap-3"):
+                        ui.label("Upload experiments?").classes("dahlia-modal-title")
+                        ui.label(f"Upload {len(confirmed_uids)} completed experiment(s) as "
+                                 f"{controller.current_user.get('email', '')}?")
+                        with ui.row().classes("w-full justify-end gap-2"):
+                            ui.button("Cancel", on_click=dialog.close).classes("dahlia-secondary-btn")
+                            ui.button("Upload", on_click=_upload_confirmed).classes("dahlia-secondary-btn")
+                    dialog.open()
+
+                upload_button = ui.button(
                     "↑  Upload to database",
                     on_click=_on_upload_click,
                 ).props("outline no-caps").classes("dahlia-secondary-btn")
@@ -136,6 +164,30 @@ def render_my_results(controller: Any) -> None:
                 _render_empty_state()
             else:
                 _render_table(controller, experiments)
+
+
+def _open_assignment_dialog(controller: Any) -> None:
+    if not controller.current_user or controller.current_user.get("user_id") is None:
+        return
+    owner = controller.current_user["user_id"]
+    uids = controller.get_unassigned_experiment_uids()
+    if not uids:
+        return
+    dialog = ui.dialog()
+
+    def confirm():
+        count = controller.assign_unassigned_experiments(owner, uids)
+        dialog.close()
+        ui.notify(f"Assigned {count} result(s). Upload requires separate approval.", type="info")
+        controller.show_my_results()
+
+    with dialog, ui.card().classes("dahlia-modal-card gap-3"):
+        ui.label("Assign offline results?").classes("dahlia-modal-title")
+        ui.label(f"Assign {len(uids)} result(s) to {controller.current_user.get('email', '')}?")
+        with ui.row().classes("w-full justify-end gap-2"):
+            ui.button("Cancel", on_click=dialog.close).classes("dahlia-secondary-btn")
+            ui.button("Assign", on_click=confirm).classes("dahlia-secondary-btn")
+    dialog.open()
 
 
 def _render_empty_state() -> None:
@@ -322,3 +374,4 @@ def _open_delete_dialog(controller: Any, idx: int) -> None:
                 on_click=lambda e: controller.delete_local_experiment(idx),
             ).classes("dahlia-danger-btn px-4")
     dialog.open()
+

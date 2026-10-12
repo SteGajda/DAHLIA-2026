@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from fastapi import APIRouter
-from app.api.v1 import admin, auth
+from app.api.v1 import admin, auth, sync
 
 router = APIRouter()
 
 router.include_router(auth.router, prefix="/auth", tags=["auth"])
 router.include_router(admin.router, prefix="/admin", tags=["admin"])
+router.include_router(sync.router, prefix="/sync", tags=["sync"])
+

@@ -305,3 +305,33 @@ class LocalStorage:
         finally:
             if self._connection_target != ":memory:":
                 conn.close()
+
+    def assign_experiments(self, user_id: int, experiment_uids: list[str]) -> int:
+        """Assign only the anonymous, unsynced records explicitly confirmed by the user."""
+        if isinstance(user_id, bool) or not isinstance(user_id, int) or user_id <= 0:
+            raise ValueError("A valid account ID is required.")
+        conn = self._get_connection()
+        updated = 0
+        try:
+            with conn:
+                for uid in dict.fromkeys(experiment_uids):
+                    row = conn.execute(
+                        "SELECT payload_json FROM local_experiments "
+                        "WHERE experiment_uid = ? AND user_id IS NULL AND sync_status != 'Synced'",
+                        (uid,),
+                    ).fetchone()
+                    if row is None:
+                        continue
+                    payload = json.loads(row["payload_json"])
+                    payload["user_id"] = user_id
+                    result = conn.execute(
+                        "UPDATE local_experiments SET user_id = ?, payload_json = ? "
+                        "WHERE experiment_uid = ? AND user_id IS NULL AND sync_status != 'Synced'",
+                        (user_id, json.dumps(payload, allow_nan=False), uid),
+                    )
+                    updated += result.rowcount
+            return updated
+        finally:
+            if self._connection_target != ":memory:":
+                conn.close()
+

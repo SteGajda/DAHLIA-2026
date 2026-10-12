@@ -279,7 +279,7 @@ def refresh(
         db.query(RefreshToken)
         .filter(
             RefreshToken.token_hash == token_hash,
-            RefreshToken.revoked.is_(False),
+            RefreshToken.revoked == False,  # noqa: E712 - SQL Server BIT requires equality
             RefreshToken.expires_at > now,
         )
         .first()
@@ -490,3 +490,4 @@ def reset_password(
     db.commit()
 
     return {"message": "Password has been successfully reset."}
+

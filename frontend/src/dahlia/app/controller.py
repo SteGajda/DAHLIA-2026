@@ -74,6 +74,8 @@ class AppController:
         self.current_user: dict | None = None
         self.api_client: ApiClient = ApiClient()
         self.is_online: bool = False
+        self._sync_in_progress = False
+        self.last_sync_error: str | None = None
 
         if self._client is not None:
             ui.timer(0.05, self.startup_check, once=True)
@@ -610,12 +612,7 @@ class AppController:
             "index_no": data.get("student_id_number"),
             "is_email_verified": bool(data.get("is_email_verified", False)),
         }
-        uid = self.current_user.get("user_id")
-        if uid is not None:
-            updated = self.storage.assign_user_to_unassigned(int(uid))
-            if updated > 0:
-                LOGGER.info("Attached %d unassigned experiments to user %s", updated, uid)
-                self.local_experiments = self.storage.get_experiments()
+        # Anonymous records stay anonymous until explicitly assigned in My Results.
 
     def _update_status_badge(self) -> None:
         """Update connection status badge in sidebar if rendered."""
@@ -691,13 +688,31 @@ class AppController:
                 "index_no": None,
                 "is_email_verified": False,
             }
-            if user_id is not None:
-                updated = self.storage.assign_user_to_unassigned(user_id)
-                if updated > 0:
-                    self.local_experiments = self.storage.get_experiments()
         return None
 
-    async def sync_local_experiments(self) -> tuple[int, int]:
+    def get_unassigned_experiment_uids(self) -> list[str]:
+        return [record["experiment_uid"] for record in self.storage.get_unsynced_experiments()
+                if record.get("user_id") is None]
+
+    def assign_unassigned_experiments(self, expected_user_id: int, experiment_uids: list[str]) -> int:
+        """Apply an assignment confirmation only if the account has not changed."""
+        if self.current_user is None or self.current_user.get("user_id") != expected_user_id:
+            return 0
+        updated = self.storage.assign_experiments(expected_user_id, experiment_uids)
+        self.local_experiments = self.storage.get_experiments()
+        return updated
+
+    def get_upload_candidates(self) -> list[dict]:
+        if self.current_user is None or self.current_user.get("user_id") is None:
+            return []
+        owner = self.current_user["user_id"]
+        return [record for record in self.storage.get_unsynced_experiments()
+                if record.get("user_id") == owner
+                and record.get("payload", {}).get("payload_schema_version") == 2]
+
+    async def sync_local_experiments(
+        self, *, experiment_uids: list[str] | None = None, expected_user_id: int | None = None,
+    ) -> tuple[int, int]:
         """Upload unsynced local experiments to the central backend database.
 
         Returns
@@ -705,32 +720,58 @@ class AppController:
         tuple[int, int]
             (synced_count, failed_count)
         """
-        if not self.is_online or self.current_user is None:
+        if not self.is_online or self.current_user is None or self._sync_in_progress:
             return 0, 0
-
-        unsynced = self.storage.get_unsynced_experiments()
+        owner = self.current_user.get("user_id")
+        if owner is None or (expected_user_id is not None and owner != expected_user_id):
+            return 0, 0
+        unsynced = self.get_upload_candidates()
+        if experiment_uids is not None:
+            confirmed = set(experiment_uids)
+            unsynced = [record for record in unsynced if record["experiment_uid"] in confirmed]
         if not unsynced:
             return 0, 0
 
+        self._sync_in_progress = True
+        self.last_sync_error = None
         synced_count = 0
         failed_count = 0
-        for exp in unsynced:
-            uid = exp["experiment_uid"]
-            payload = dict(exp.get("payload", {}))
-            payload["experiment_uid"] = uid
-            payload["user_id"] = self.current_user.get("user_id")
-
-            self.storage.update_sync_status(uid, "Sync pending")
-            res = await self.api_client.sync_experiment(payload)
-            if res.success or res.status_code in (200, 201, 409):
-                # 201 Created or 409 Conflict (idempotency: already exists on server)
-                self.storage.update_sync_status(uid, "Synced")
-                synced_count += 1
-            else:
-                self.storage.update_sync_status(uid, "Sync failed")
-                failed_count += 1
-
-        self.local_experiments = self.storage.get_experiments()
+        try:
+            for exp in unsynced:
+                if self.current_user is None or self.current_user.get("user_id") != owner:
+                    break
+                uid = exp["experiment_uid"]
+                payload = dict(exp.get("payload", {}))
+                payload["experiment_uid"] = uid
+                payload["user_id"] = owner
+                self.storage.update_sync_status(uid, "Sync pending")
+                try:
+                    res = await self.api_client.sync_experiment(payload)
+                    acknowledged = (
+                        res.success and res.status_code in (200, 201)
+                        and isinstance(res.data, dict)
+                        and res.data.get("status") in ("synced", "already_synced")
+                        and res.data.get("experiment_uid") == uid
+                    )
+                    if res.is_offline:
+                        self.is_online = False
+                    error = res.error or "The server did not confirm this experiment."
+                except Exception:
+                    LOGGER.exception("Experiment upload failed")
+                    acknowledged = False
+                    error = "Connection failed; retry the upload."
+                if acknowledged:
+                    self.storage.update_sync_status(uid, "Synced")
+                    synced_count += 1
+                else:
+                    self.storage.update_sync_status(uid, "Sync failed")
+                    self.last_sync_error = error
+                    failed_count += 1
+                if not self.is_online:
+                    break
+        finally:
+            self._sync_in_progress = False
+            self.local_experiments = self.storage.get_experiments()
         return synced_count, failed_count
 
     async def do_register(
@@ -868,3 +909,4 @@ class AppController:
         if not agreed:
             return "You must agree to the data processing terms."
         return None
+

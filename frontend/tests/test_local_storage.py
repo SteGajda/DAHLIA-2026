@@ -226,8 +226,8 @@ def test_controller_sync_local_experiments() -> None:
         controller.is_online = True
         controller.current_user = {"user_id": 99, "email": "test@pw.edu.pl", "role": "USER"}
 
-        # Save an experiment
-        storage.save_experiment(
+        # Save a complete experiment already assigned to this account.
+        uid = storage.save_experiment(
             dataset_name="iris",
             seed=1,
             na_fraction=0.1,
@@ -235,7 +235,12 @@ def test_controller_sync_local_experiments() -> None:
             results_df=_sample_results_df(),
             answers={1: 2.0},
             annotation_indices=[1],
-            user_id=None,
+            user_id=99,
+            completed_data={
+                "app_version": "1.1.0", "dataset_config": {},
+                "removed_indices": [1], "true_values": {"1": 2.0},
+                "algorithm_predictions": {},
+            },
         )
         controller.local_experiments = storage.get_experiments()
         assert len(controller.local_experiments) == 1
@@ -243,7 +248,8 @@ def test_controller_sync_local_experiments() -> None:
 
         # Mock API sync call
         controller.api_client.sync_experiment = AsyncMock(
-            return_value=ApiResult(success=True, status_code=201, data={"status": "ok"})
+            return_value=ApiResult(success=True, status_code=201,
+                                   data={"status": "synced", "experiment_uid": uid})
         )
 
         synced, failed = await controller.sync_local_experiments()
@@ -254,4 +260,5 @@ def test_controller_sync_local_experiments() -> None:
         assert storage.get_unsynced_experiments() == []
 
     asyncio.run(_test())
+
 
