@@ -112,8 +112,13 @@ class LocalStorage:
         created_at: str | None = None,
         sync_status: str = "Local only",
         experiment_uid: str | None = None,
+        completed_data: dict[str, Any] | None = None,
     ) -> str:
         """Persist a completed experiment record to SQLite.
+
+        ``completed_data`` is produced by ``build_storage_details`` and makes
+        the payload version 2. Calls using the legacy arguments remain version
+        1; they cannot recover truth or predictions absent from older records.
 
         Returns
         -------
@@ -126,6 +131,7 @@ class LocalStorage:
         # Build serialisable payload
         results_records = results_df.to_dict(orient="records")
         payload = {
+            "payload_schema_version": 1,
             "experiment_uid": uid,
             "created_at": ts,
             "dataset_name": dataset_name,
@@ -137,7 +143,17 @@ class LocalStorage:
             "annotation_indices": [int(i) for i in annotation_indices],
             "metrics": results_records,
         }
-        payload_str = json.dumps(payload)
+        if completed_data is not None:
+            expected_fields = {
+                "app_version", "dataset_config", "removed_indices",
+                "true_values", "algorithm_predictions",
+            }
+            if set(completed_data) != expected_fields:
+                raise ValueError("Completed experiment data has unexpected or missing fields.")
+            payload.update(completed_data)
+            payload["payload_schema_version"] = 2
+        # Reject NaN/Infinity rather than persisting non-standard JSON.
+        payload_str = json.dumps(payload, allow_nan=False)
 
         conn = self._get_connection()
         try:
@@ -208,6 +224,8 @@ class LocalStorage:
                     payload = {}
 
                 metrics_records = payload.get("metrics", [])
+                # Records from before versioned payloads remain readable.
+                payload.setdefault("payload_schema_version", 1)
                 results_df = pd.DataFrame(metrics_records) if metrics_records else pd.DataFrame()
 
                 # Parse display date

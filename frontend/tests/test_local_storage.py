@@ -12,6 +12,7 @@ from dahlia.app.controller import AppController
 from dahlia.core.api_client import ApiResult
 from dahlia.services.experiment import PreparedExperiment
 from dahlia.services.local_storage import LocalStorage
+from dahlia.services.config import IRIS_CONFIG, METHOD_ORDER
 
 
 def _sample_results_df() -> pd.DataFrame:
@@ -186,19 +187,29 @@ def test_controller_local_storage_lifecycle() -> None:
     # Mock an active completed experiment
     mock_exp = MagicMock(spec=PreparedExperiment)
     mock_exp.config.name = "iris"
+    mock_exp.config = IRIS_CONFIG
     mock_exp.seed = 42
     mock_exp.na_fraction = 0.1
     mock_exp.projection_name = "tsne"
     mock_exp.answers = {5: 3.14}
     mock_exp.annotation_indices = [5]
+    mock_exp.removed_indices = [5, 6]
+    mock_exp.original = pd.DataFrame({"SepalLengthCm": [3.2, 4.1]}, index=[5, 6])
 
     controller.experiment = mock_exp
     controller.results = _sample_results_df()
+    controller.algorithm_predictions = {
+        method: pd.Series([3.1, 4.0], index=[5, 6])
+        for method in METHOD_ORDER[1:]
+    }
 
     controller._save_current_experiment()
     assert len(controller.local_experiments) == 1
     assert controller.local_experiments[0]["dataset"] == "iris"
     assert controller.local_experiments[0]["sync_status"] == "Local only"
+    controller._save_current_experiment()
+    assert len(storage.get_experiments()) == 1
+    assert controller.local_experiments[0]["payload"]["payload_schema_version"] == 2
 
     # Delete experiment
     controller.delete_local_experiment(0)

@@ -5,6 +5,7 @@ from __future__ import annotations
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from decimal import Decimal
+from importlib.metadata import PackageNotFoundError, version
 from typing import Mapping
 
 import math
@@ -60,6 +61,68 @@ class PreparedExperiment:
 
 def precision_digits(precision: float) -> int:
     return max(0, -Decimal(str(precision)).as_tuple().exponent)
+
+
+def build_storage_details(
+    experiment: PreparedExperiment,
+    algorithm_predictions: Mapping[str, pd.Series],
+) -> dict:
+    """Build a complete, finite JSON payload without persisting the dataframe.
+
+    Point identifiers are the dataset's integer row indices. Annotation order
+    is preserved separately by LocalStorage; all removed points are stored,
+    including those that the human did not annotate.
+    """
+    annotations = [int(i) for i in experiment.annotation_indices]
+    removed = [int(i) for i in experiment.removed_indices]
+    if not annotations or len(set(annotations)) != len(annotations):
+        raise ValueError("Annotation indices must be non-empty and unique.")
+    if set(experiment.answers) != set(annotations):
+        raise ValueError("Only fully annotated experiments can be saved.")
+    if len(set(removed)) != len(removed) or not set(annotations).issubset(removed):
+        raise ValueError("Removed indices must be unique and contain all annotations.")
+    if not experiment.original.index.is_unique:
+        raise ValueError("Dataset row indices must be unique.")
+
+    def finite_values(values: pd.Series) -> dict[str, float]:
+        if not values.index.is_unique:
+            raise ValueError("Prediction indices must be unique.")
+        ordered = values.reindex(removed)
+        result = {str(i): float(ordered.loc[i]) for i in removed}
+        if not all(math.isfinite(v) for v in result.values()):
+            raise ValueError("True values and predictions must be finite for every removed point.")
+        return result
+
+    if not all(math.isfinite(float(v)) for v in experiment.answers.values()):
+        raise ValueError("Human answers must be finite.")
+    expected_methods = set(METHOD_ORDER[1:])
+    if set(algorithm_predictions) != expected_methods:
+        raise ValueError("Predictions from all six baseline methods are required.")
+    cfg = experiment.config
+    truth = finite_values(experiment.original[cfg.incomplete_column])
+    predictions = {
+        method: finite_values(algorithm_predictions[method])
+        for method in METHOD_ORDER[1:]
+    }
+    try:
+        app_version = version("dahlia")
+    except PackageNotFoundError:
+        app_version = "1.1.0"
+    return {
+        "app_version": app_version,
+        "dataset_config": {
+            "incomplete_column": cfg.incomplete_column,
+            "target_column": cfg.target_column,
+            "reference_columns": list(cfg.reference_columns),
+            "categorical_columns": list(cfg.categorical_columns),
+            "precision": cfg.precision,
+            "number_of_clusters": cfg.number_of_clusters,
+            "knn_number_of_neighbors": cfg.knn_number_of_neighbors,
+        },
+        "removed_indices": removed,
+        "true_values": truth,
+        "algorithm_predictions": predictions,
+    }
 
 
 def snap_value(

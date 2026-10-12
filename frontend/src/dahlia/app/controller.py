@@ -36,7 +36,7 @@ from dahlia.services import (
     snap_value,
     start_algorithm_predictions,
 )
-from dahlia.services.experiment import precision_digits
+from dahlia.services.experiment import build_storage_details, precision_digits
 
 LOGGER = logging.getLogger(__name__)
 
@@ -63,6 +63,7 @@ class AppController:
         self.algorithm_predictions: dict[str, pd.Series] | None = None
         self.current_prediction = 0.0
         self.results: pd.DataFrame | None = None
+        self._saved_experiment_uid: str | None = None
 
         self.setup_elements: dict[str, Any] = {}
         self.experiment_elements: dict[str, Any] = {}
@@ -128,6 +129,7 @@ class AppController:
         self.prediction_future = None
         self.algorithm_predictions = None
         self.results = None
+        self._saved_experiment_uid = None
         self._clear()
         self._set_exit_guard(False)
         with self.root:
@@ -242,6 +244,7 @@ class AppController:
             return
 
         self.experiment = experiment
+        self._saved_experiment_uid = None
         self.prediction_future = prediction_future
         self.algorithm_predictions = None
         self.current_prediction = experiment.value_min
@@ -454,18 +457,23 @@ class AppController:
     def _save_current_experiment(self) -> None:
         """Persist completed experiment to SQLite buffer with sync_status 'Local only'.
 
-        Stores both the metrics summary (``results`` DataFrame) and the raw
-        annotator answers (``answers`` dict + ``annotation_indices``) in local SQLite
-        so that both can be exported or synced to the database later.
+        Store metrics, human answers, every removed value and all baseline
+        predictions once per completed experiment. The original dataframe is
+        not persisted. A failed write leaves the experiment available to retry.
         """
         if self.experiment is None or self.results is None:
             return
+        if self._saved_experiment_uid is not None:
+            return
+        if self.algorithm_predictions is None:
+            raise ValueError("Baseline predictions must be ready before saving.")
+        completed_data = build_storage_details(self.experiment, self.algorithm_predictions)
 
         user_id = self.current_user.get("user_id") if self.current_user else None
         answers = {int(k): float(v) for k, v in self.experiment.answers.items()}
         annotation_indices = [int(i) for i in self.experiment.annotation_indices]
 
-        self.storage.save_experiment(
+        self._saved_experiment_uid = self.storage.save_experiment(
             dataset_name=self.experiment.config.name,
             seed=self.experiment.seed,
             na_fraction=self.experiment.na_fraction,
@@ -475,6 +483,7 @@ class AppController:
             annotation_indices=annotation_indices,
             user_id=user_id,
             sync_status="Local only",
+            completed_data=completed_data,
         )
         self.local_experiments = self.storage.get_experiments()
 
