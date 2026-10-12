@@ -290,7 +290,7 @@ class RoleRequest(Base):
     )
     reviewed_by: Mapped[int | None] = mapped_column(
         BigInteger,
-        ForeignKey("dahlia.app_user.user_id", ondelete="SET NULL"),
+        ForeignKey("dahlia.app_user.user_id", ondelete="NO ACTION"),
         nullable=True,
     )
     reviewed_at: Mapped[datetime | None] = mapped_column(

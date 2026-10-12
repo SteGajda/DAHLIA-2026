@@ -94,7 +94,7 @@ def upgrade() -> None:
         sa.Column('reviewed_by', sa.BigInteger(), nullable=True),
         sa.Column('reviewed_at', sa.DateTime(timezone=True), nullable=True),
         sa.ForeignKeyConstraint(
-            ['reviewed_by'], ['dahlia.app_user.user_id'], ondelete='SET NULL'
+            ['reviewed_by'], ['dahlia.app_user.user_id'], ondelete='NO ACTION'
         ),
         sa.ForeignKeyConstraint(
             ['user_id'], ['dahlia.app_user.user_id'], ondelete='CASCADE'
