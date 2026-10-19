@@ -47,7 +47,7 @@ if config.config_file_name is not None:
 from app.core.config import get_settings  # noqa: E402
 
 _settings = get_settings()
-config.set_main_option("sqlalchemy.url", _settings.DATABASE_URL)
+config.set_main_option("sqlalchemy.url", _settings.DATABASE_URL.replace("%", "%%"))
 
 # Import Base (and all models registered in app/db/base.py as a side-effect)
 from app.db.base import Base  # noqa: E402

@@ -7,6 +7,7 @@ offline-first resilience.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 from dataclasses import dataclass
@@ -38,7 +39,7 @@ class ApiClient:
     def __init__(
         self,
         base_url: str | None = None,
-        timeout: float = 5.0,
+        timeout: float | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         """Initialise API client.
@@ -55,7 +56,14 @@ class ApiClient:
         """
         raw_url = base_url or os.getenv("DAHLIA_API_URL", "http://127.0.0.1:8000")
         self.base_url = raw_url.rstrip("/")
-        self.timeout = timeout
+        self.timeout = timeout if timeout is not None else float(os.getenv("DAHLIA_API_TIMEOUT", "5"))
+        if self.timeout <= 0 or not self.timeout < float("inf"):
+            raise ValueError("DAHLIA_API_TIMEOUT must be positive and finite.")
+        self.keyring_service = (
+            KEYRING_SERVICE_NAME
+            if self.base_url == "http://127.0.0.1:8000"
+            else KEYRING_SERVICE_NAME + ":" + hashlib.sha256(self.base_url.encode()).hexdigest()[:32]
+        )
         self.transport = transport
 
         # Ephemeral session token (kept only in RAM)
@@ -67,7 +75,7 @@ class ApiClient:
         try:
             import keyring
 
-            keyring.set_password(KEYRING_SERVICE_NAME, KEYRING_USERNAME, token)
+            keyring.set_password(self.keyring_service, KEYRING_USERNAME, token)
             return True
         except Exception as err:
             LOGGER.warning("Could not persist refresh token to keyring: %s", err)
@@ -78,7 +86,7 @@ class ApiClient:
         try:
             import keyring
 
-            return keyring.get_password(KEYRING_SERVICE_NAME, KEYRING_USERNAME)
+            return keyring.get_password(self.keyring_service, KEYRING_USERNAME)
         except Exception as err:
             LOGGER.warning("Could not read refresh token from keyring: %s", err)
             return None
@@ -88,7 +96,7 @@ class ApiClient:
         try:
             import keyring
 
-            keyring.delete_password(KEYRING_SERVICE_NAME, KEYRING_USERNAME)
+            keyring.delete_password(self.keyring_service, KEYRING_USERNAME)
             return True
         except Exception as err:
             LOGGER.debug("Could not delete refresh token from keyring (may not exist): %s", err)
