@@ -26,7 +26,7 @@ dev = [
     "pytest>=8.0,<10.0",
 ]
 build = [
-    "nicegui-pack",
+    "pyinstaller-hooks-contrib>=2025.10",
     "pyinstaller>=6.0,<7.0",
 ]
 

@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, EmailStr, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
 
 # Registration
@@ -62,12 +62,14 @@ class RegisterResponse(BaseModel):
     message: str
     user_id: int
 
+    email_sent: bool = False
+
 
 # E-mail verification
 class VerifyEmailRequest(BaseModel):
     """Request body for ``POST /api/v1/auth/verify-email``."""
 
-    token: str
+    token: str = Field(min_length=1, max_length=4096)
 
 
 # Login / logout

@@ -341,6 +341,10 @@ class ApiClient:
         """Activate account using email verification token."""
         return await self._request("POST", "/api/v1/auth/verify-email", json={"token": token})
 
+    async def resend_verification(self) -> ApiResult:
+        """Send a verification link to the authenticated account's own address."""
+        return await self._request("POST", "/api/v1/auth/resend-verification", auth=True)
+
     async def forgot_password(self, email: str) -> ApiResult:
         """Request a password reset link."""
         return await self._request("POST", "/api/v1/auth/forgot-password", json={"email": email.strip()})
@@ -375,6 +379,13 @@ class ApiClient:
         )
 
     # Sync endpoints
+    async def get_database_access(self) -> ApiResult:
+        return await self._request("GET", "/api/v1/database-access/me", auth=True)
+
+    async def issue_sql_credentials(self, client_ipv4: str) -> ApiResult:
+        return await self._request("POST", "/api/v1/database-access/credentials",
+                                   json={"client_ipv4": client_ipv4.strip()}, auth=True)
+
     async def sync_experiment(self, payload: dict[str, Any]) -> ApiResult:
         """Upload a completed experiment record to the central database."""
         return await self._request("POST", "/api/v1/sync/experiment", json=payload, auth=True)

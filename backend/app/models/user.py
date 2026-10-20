@@ -19,8 +19,8 @@ Role codes
 ----------
 * ``USER``: Default role assigned on registration.
 * ``USER_PLUS``: Read access to the central results database.
-* ``RESEARCHER``: Full read/write access to results, experiment configuration, and predefined imputation sets.
-* ``DEVELOPER``: Highest administrative role (user/dataset management).
+* ``RESEARCHER``: Read-only SQL access to research tables.
+* ``DEVELOPER``: Application administration and read-only SQL access; not SQL administrator.
 """
 
 from __future__ import annotations
@@ -33,7 +33,9 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Integer,
+    Index,
     String,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -102,7 +104,11 @@ class AppUser(Base):
     """
 
     __tablename__ = "app_user"
-    __table_args__ = {"schema": "dahlia"}
+    __table_args__ = (
+        Index("UX_app_user_sql_username", "sql_username", unique=True,
+              mssql_where=text("sql_username IS NOT NULL")),
+        {"schema": "dahlia"},
+    )
 
     user_id: Mapped[int] = mapped_column(
         BigInteger().with_variant(Integer, "sqlite"),
@@ -129,6 +135,12 @@ class AppUser(Base):
     is_email_verified: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False
     )
+    email_verification_sent_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    sql_username: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    sql_password_issued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    sql_client_ipv4: Mapped[str | None] = mapped_column(String(15), nullable=True)
     is_active: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True
     )

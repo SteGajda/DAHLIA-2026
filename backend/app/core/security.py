@@ -77,7 +77,7 @@ def create_access_token(user_id: int, role_code: str) -> str:
     return jwt.encode(payload, settings.SECRET_KEY, algorithm=_ALGORITHM)
 
 
-def create_email_verification_token(user_id: int) -> str:
+def create_email_verification_token(user_id: int, email: str | None = None) -> str:
     """Create a short-lived JWT for e-mail address verification (TTL: 24 h).
 
     The ``purpose`` claim prevents this token from being accepted on any other
@@ -91,6 +91,8 @@ def create_email_verification_token(user_id: int) -> str:
         "iat": now,
         "exp": now + timedelta(hours=24),
     }
+    if email is not None:
+        payload["email"] = email
     return jwt.encode(payload, settings.SECRET_KEY, algorithm=_ALGORITHM)
 
 

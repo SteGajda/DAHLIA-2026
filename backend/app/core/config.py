@@ -19,7 +19,10 @@ The ``.env`` file is excluded from version control via ``.gitignore``.
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Literal
+from urllib.parse import urlsplit
 
+from pydantic import EmailStr, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -72,7 +75,36 @@ class Settings(BaseSettings):
     # General 
     APP_ENV: str = "development"
 
+    SQL_ACCESS_ENABLED: bool = False
+    SQL_ACCESS_HOST: str = "dahlia-2026.database.windows.net"
+    SQL_ACCESS_DATABASE: str = "DAHLIA"
+
+    # Disabled until an administrator configures a real sender.
+    EMAIL_DELIVERY_MODE: Literal["disabled", "smtp"] = "disabled"
+    PUBLIC_API_URL: str = "http://127.0.0.1:8000"
+    SMTP_HOST: str = "smtp.gmail.com"
+    SMTP_PORT: int = Field(default=587, ge=1, le=65535)
+    SMTP_USERNAME: str = ""
+    SMTP_PASSWORD: SecretStr = SecretStr("")
+    SMTP_FROM_EMAIL: EmailStr = "dahlia.imputation@gmail.com"
+    SMTP_TIMEOUT_SECONDS: int = Field(default=20, ge=1, le=60)
+    EMAIL_RESEND_COOLDOWN_SECONDS: int = Field(default=60, ge=60, le=86400)
+
+    @model_validator(mode="after")
+    def validate_email_settings(self):
+        if self.EMAIL_DELIVERY_MODE == "smtp":
+            url = urlsplit(self.PUBLIC_API_URL)
+            local = url.hostname in {"127.0.0.1", "localhost", "::1"}
+            if (not url.hostname or url.username or url.password or url.query
+                    or url.fragment or url.path not in {"", "/"}
+                    or (url.scheme != "https" and not (local and url.scheme == "http"))):
+                raise ValueError("PUBLIC_API_URL must be an HTTPS origin (HTTP is allowed on localhost).")
+            if not self.SMTP_HOST or not self.SMTP_USERNAME or not self.SMTP_PASSWORD.get_secret_value():
+                raise ValueError("SMTP host, username and app password are required in smtp mode.")
+        return self
+
     model_config = SettingsConfigDict(
+        hide_input_in_errors=True,
         env_file=".env",
         env_file_encoding="utf-8",
         # Unknown variables in .env are silently ignored so that a shared

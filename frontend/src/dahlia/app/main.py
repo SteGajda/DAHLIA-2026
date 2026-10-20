@@ -7,7 +7,7 @@ import sys
 from multiprocessing import freeze_support
 from typing import Any
 
-from nicegui import app, ui
+from nicegui import app, native as native_window, ui
 
 from dahlia.app.controller import AppController
 from dahlia.app.theme import APP_CSS, ESCAPE_AND_EXIT_GUARD
@@ -41,7 +41,10 @@ def main(*, native: bool | None = None, port: int | None = None) -> None:
         else ("--browser" not in sys.argv and os.getenv("DAHLIA_NATIVE", "1") == "1")
     )
     # NiceGUI internal webview must not use port 8000 (reserved for backend API)
-    app_port = port or int(os.getenv("DAHLIA_PORT", "8080") or "8080")
+    if port is None and not os.getenv("DAHLIA_PORT") and getattr(sys, "frozen", False):
+        app_port = native_window.find_open_port()
+    else:
+        app_port = port or int(os.getenv("DAHLIA_PORT", "8080") or "8080")
     run_kwargs: dict[str, Any] = {
         "title": f"DAHLIA {APP_VERSION}",
         "native": is_native,
@@ -52,6 +55,8 @@ def main(*, native: bool | None = None, port: int | None = None) -> None:
         "show_welcome_message": False,
         "port": app_port,
     }
+    if getattr(sys, "frozen", False):
+        run_kwargs["host"] = "127.0.0.1"
     if is_native:
         run_kwargs["fullscreen"] = True
 

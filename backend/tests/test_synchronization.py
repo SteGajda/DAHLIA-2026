@@ -23,8 +23,8 @@ from app.schemas.experiment import METHODS
 @pytest.fixture()
 def upload(sqlite_session):
     s = sqlite_session
-    user = AppUser(email='sync@example.com', display_name='Sync test', password_hash='unused')
-    other = AppUser(email='other@example.com', display_name='Other', password_hash='unused')
+    user = AppUser(email='sync@example.com', display_name='Sync test', password_hash='unused', is_email_verified=True)
+    other = AppUser(email='other@example.com', display_name='Other', password_hash='unused', is_email_verified=True)
     s.add_all([user, other])
     s.flush()
     stream = io.StringIO()
@@ -87,6 +87,21 @@ def test_complete_upload_and_retry_do_not_duplicate(client, sqlite_session, uplo
 def test_upload_requires_authentication(client, upload):
     payload, _, _ = upload
     assert client.post('/api/v1/sync/experiment', json=payload).status_code in (401, 403)
+
+
+def test_unverified_account_cannot_upload_even_with_valid_token(client, sqlite_session, upload):
+    payload, headers, _ = upload
+    user = sqlite_session.get(AppUser, payload['user_id'])
+    user.is_email_verified = False
+    sqlite_session.commit()
+    response = client.post('/api/v1/sync/experiment', json=payload, headers=headers)
+    assert response.status_code == 403
+    assert 'verify' in response.json()['detail'].lower()
+    assert count(sqlite_session, Experiment) == 0
+    user.is_email_verified = True
+    sqlite_session.commit()
+    # The original access token works after verification, no forced re-login.
+    assert client.post('/api/v1/sync/experiment', json=payload, headers=headers).status_code == 201
 
 
 def test_owner_comes_from_authenticated_account(client, sqlite_session, upload):

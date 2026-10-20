@@ -119,6 +119,20 @@ body.body--dark { background: var(--dahlia-surface) !important; }
   box-shadow: none !important;
 }
 
+
+/* Equal action button heights */
+.dahlia-primary-btn,
+.dahlia-secondary-btn,
+.dahlia-danger-btn {
+  box-sizing: border-box !important;
+  height: 44px !important;
+  min-height: 44px !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+  font-size: 14px !important;
+  line-height: 20px !important;
+}
+
 .dahlia-error {
   width: 100%;
   padding: 10px 12px;
@@ -169,15 +183,15 @@ body.body--dark { background: var(--dahlia-surface) !important; }
 
 .dahlia-tick-row {
   width: 100%;
-  display: flex;
-  justify-content: space-between;
+  position: relative;
+  height: 22px;
   margin-top: -4px;
   color: var(--dahlia-muted);
   font-size: 9px;
   line-height: 1;
   user-select: none;
 }
-.dahlia-tick { text-align: center; transform: translateX(0); }
+.dahlia-tick { position: absolute; top: 0; text-align: center; transform: translateX(-50%); }
 .dahlia-tick::before {
   content: "";
   display: block;

@@ -86,6 +86,16 @@ def get_current_user(
     return user
 
 
+def get_verified_user(
+    current_user: AppUser = Depends(get_current_user),
+) -> AppUser:
+    """Check current database state rather than trusting a stale token claim."""
+    if not current_user.is_email_verified:
+        raise HTTPException(status_code=403,
+                            detail="Please verify your email address before uploading experiments.")
+    return current_user
+
+
 def require_role(*roles: str):
     """Return a dependency that enforces one of the given ``role_code`` values.
 

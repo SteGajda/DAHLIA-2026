@@ -690,6 +690,36 @@ class AppController:
             }
         return None
 
+    async def resend_verification(self) -> tuple[bool, str]:
+        if self.current_user is None:
+            return False, "Please log in first."
+        owner = self.current_user.get("user_id")
+        result = await self.api_client.resend_verification()
+        if self.current_user is None or self.current_user.get("user_id") != owner:
+            return False, "The account changed. Please try again."
+        self.is_online = not result.is_offline
+        if not result.success:
+            return False, result.error or "Could not send the verification email."
+        return True, (result.data or {}).get("message", "Check your inbox and spam folder.")
+
+    async def refresh_verification_status(self) -> tuple[bool, str]:
+        if self.current_user is None:
+            return False, "Please log in first."
+        owner = self.current_user.get("user_id")
+        result = await self.api_client.get_me()
+        if self.current_user is None or self.current_user.get("user_id") != owner:
+            return False, "The account changed. Please try again."
+        self.is_online = not result.is_offline
+        if not result.success or not isinstance(result.data, dict):
+            return False, result.error or "Could not refresh the profile."
+        if result.data.get("user_id") != owner:
+            return False, "The account changed. Please log in again."
+        self._set_user_from_profile(result.data)
+        self._update_status_badge()
+        if self.current_user["is_email_verified"]:
+            return True, "Email verified. You can now upload your experiments."
+        return False, "Email is not verified yet. Open the link in your email and confirm it."
+
     def get_unassigned_experiment_uids(self) -> list[str]:
         return [record["experiment_uid"] for record in self.storage.get_unsynced_experiments()
                 if record.get("user_id") is None]
@@ -827,6 +857,10 @@ class AppController:
             return result.error or "Registration failed."
 
         self.is_online = True
+        self.registration_message = (result.data or {}).get(
+            "message", "Account created. Log in and request a verification email from Profile."
+        )
+        self.registration_email_sent = bool((result.data or {}).get("email_sent"))
         return None
 
     async def request_role(

@@ -19,9 +19,12 @@ from dahlia.services.experiment import precision_digits
 def _tick_markup(experiment: Any) -> str:
     """Return an HTML string of labelled tick marks for the slider range."""
     digits = precision_digits(experiment.config.precision)
+    span = experiment.value_max - experiment.value_min
     items = "".join(
-        f'<span class="dahlia-tick">{escape(f"{value:.{digits}f}")}</span>'
+        f'<span class="dahlia-tick" style="left:{(100 * (value - experiment.value_min) / span) if span > 0 else 0:.8f}%">'
+        f'{escape(f"{value:.{digits}f}")}</span>'
         for value in experiment.display_ticks
+        if experiment.value_min <= value <= experiment.value_max
     )
     return f'<div class="dahlia-tick-row">{items}</div>'
 

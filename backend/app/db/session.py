@@ -43,6 +43,8 @@ engine = create_engine(
     connect_args=_connect_args,
     # pool_pre_ping=True discards stale connections (useful for Azure SQL).
     pool_pre_ping=True,
+    # Credential provisioning binds a one-time SQL password as a parameter.
+    hide_parameters=True,
 )
 
 # SQLite schema adapter

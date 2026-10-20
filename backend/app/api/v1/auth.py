@@ -3,8 +3,8 @@
 Endpoints
 ---------
 POST /register
-    Create a new user account.  Sends the e-mail verification token to the
-    console (mock SMTP for dev; no external mail server required).
+    Create a new user account.  Sends an e-mail verification link through the
+    configured SMTP sender. No verification tokens are logged.
 
 POST /verify-email
     Activate an account using the JWT from the verification e-mail.
@@ -40,7 +40,6 @@ from app.api.deps import get_current_user
 from app.core.config import get_settings
 from app.core.security import (
     create_access_token,
-    create_email_verification_token,
     create_password_reset_token,
     create_refresh_token,
     decode_token,
@@ -48,6 +47,10 @@ from app.core.security import (
     hash_refresh_token,
     verify_password,
 )
+from app.services.verification_email import (
+    EmailCooldownError, EmailDeliveryError, request_verification_email,
+)
+from app.services.verification_page import verification_page
 from app.db.session import get_db
 from app.models.user import AppUser, RefreshToken, RoleRequest
 from app.schemas.auth import (
@@ -94,7 +97,7 @@ def register(
     """Register a new DAHLIA user.
 
     On success the account is created with ``is_email_verified = False``.
-    A verification token is printed to the server log (mock SMTP).
+    A verification link is sent through the configured SMTP sender.
     The account can be used to log in immediately, but the sync endpoint
     requires e-mail verification.
     """
@@ -121,22 +124,49 @@ def register(
     db.commit()
     db.refresh(user)
 
-    verify_token = create_email_verification_token(user.user_id)
-    # In production this would be sent via SMTP.  For dev, log to console.
-    logger.info(
-        "[MOCK-SMTP] E-mail verification token for <%s>: "
-        'POST /api/v1/auth/verify-email  body={"token": "%s"}',
-        user.email,
-        verify_token,
-    )
+    email_sent = False
+    try:
+        request_verification_email(db, user)
+        email_sent = True
+    except (EmailDeliveryError, EmailCooldownError):
+        logger.warning("Registration completed; verification mail was not submitted.")
 
     return RegisterResponse(
         message=(
-            "Account created successfully. "
-            "Check server logs for the e-mail verification token."
+            "Account created. Check your inbox and spam folder for the verification email."
+            if email_sent else
+            "Account created, but the verification email could not be sent. "
+            "Log in and request it again from Profile."
         ),
         user_id=user.user_id,
+        email_sent=email_sent,
     )
+
+
+@router.post("/resend-verification", summary="Send a verification email to the current account")
+def resend_verification(
+    user: AppUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    if user.is_email_verified:
+        return {"message": "Your email address is already verified.", "email_sent": False}
+    try:
+        request_verification_email(db, user)
+    except EmailCooldownError:
+        seconds = get_settings().EMAIL_RESEND_COOLDOWN_SECONDS
+        raise HTTPException(status_code=429,
+                            detail=f"Please wait {seconds} seconds before requesting another email.",
+                            headers={"Retry-After": str(seconds)})
+    except EmailDeliveryError:
+        logger.warning("Verification mail could not be submitted to SMTP.")
+        raise HTTPException(status_code=503,
+                            detail="Could not send the verification email. Please try again later.")
+    return {"message": "Verification email sent. Check your inbox and spam folder.", "email_sent": True}
+
+
+@router.get("/verify-email", include_in_schema=False)
+def email_confirmation_page():
+    return verification_page()
 
 
 # POST /verify-email
@@ -167,6 +197,9 @@ def verify_email(
             detail="Invalid verification token.",
         )
 
+    if not all(key in claims for key in ("sub", "iat", "exp")):
+        raise HTTPException(status_code=400, detail="Incomplete verification token.")
+
     if claims.get("purpose") != "email_verify":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -187,6 +220,9 @@ def verify_email(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User account not found.",
         )
+
+    if "email" in claims and claims["email"] != user.email:
+        raise HTTPException(status_code=400, detail="Verification token refers to another email address.")
 
     if user.is_email_verified:
         return {"message": "E-mail address is already verified."}

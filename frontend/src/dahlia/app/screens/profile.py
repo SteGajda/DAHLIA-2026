@@ -7,6 +7,7 @@ from typing import Any
 from nicegui import ui
 
 from dahlia.app.components.layout import sidebar_page
+from dahlia.app.components.database_access import render_database_access
 
 
 # Public render functions
@@ -219,6 +220,39 @@ def render_profile_view(controller: Any) -> None:
                         )
                     _info_row("Local experiments", str(local_count))
                     _info_row("Sync status", sync_status)
+                    _info_row("Email verification", "Verified" if user.get("is_email_verified") else "Not verified")
+
+                if not user.get("is_email_verified"):
+                    ui.label(
+                        "Verify your email before uploading experiments. "
+                        "Open the verification link from your inbox, confirm it, "
+                        "then check the status here."
+                    ).classes("text-sm dahlia-muted mb-3")
+
+                    async def send_verification() -> None:
+                        send_button.disable()
+                        try:
+                            ok, message = await controller.resend_verification()
+                            ui.notify(message, type="positive" if ok else "warning", timeout=6000)
+                        finally:
+                            send_button.enable()
+
+                    async def check_verification() -> None:
+                        check_button.disable()
+                        try:
+                            ok, message = await controller.refresh_verification_status()
+                            ui.notify(message, type="positive" if ok else "warning", timeout=6000)
+                        finally:
+                            check_button.enable()
+                        if ok:
+                            controller.show_profile()
+
+                    send_button = ui.button("Send verification email", on_click=send_verification).classes(
+                        "dahlia-secondary-btn w-full mb-3"
+                    )
+                    check_button = ui.button("Check verification status", on_click=check_verification).classes(
+                        "dahlia-secondary-btn w-full mb-3"
+                    )
 
                 # Upgrade options strictly one level higher:
                 # USER -> USER_PLUS, USER_PLUS -> RESEARCHER
@@ -253,6 +287,8 @@ def render_profile_view(controller: Any) -> None:
                         "dahlia-secondary-btn w-full mb-3"
                     )
 
+                render_database_access(controller)
+
                 ui.button(
                     "Log out",
                     on_click=controller.logout,
@@ -286,9 +322,9 @@ async def _do_register(
         error_label.set_visibility(True)
     else:
         ui.notify(
-            "Account created successfully. Check server logs for activation token.",
-            type="positive",
-            timeout=5000,
+            getattr(controller, "registration_message", "Account created. Log in to verify your email."),
+            type="positive" if getattr(controller, "registration_email_sent", False) else "warning",
+            timeout=8000,
         )
         controller.show_login()
 
