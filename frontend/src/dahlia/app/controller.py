@@ -18,6 +18,7 @@ from dahlia.app.components.chart import PLOTLY_CONFIG, build_experiment_figure
 from dahlia.app.screens.experiment import render_experiment
 from dahlia.app.screens.my_results import render_my_results
 from dahlia.app.screens.admin import render_admin
+from dahlia.app.screens.predefined_sets import render_predefined_sets
 from dahlia.app.screens.profile import (
     render_login,
     render_profile,
@@ -37,6 +38,7 @@ from dahlia.services import (
     start_algorithm_predictions,
 )
 from dahlia.services.experiment import build_storage_details, precision_digits
+from dahlia.services.predefined_sets import can_manage_predefined_sets
 
 LOGGER = logging.getLogger(__name__)
 
@@ -436,6 +438,17 @@ class AppController:
         self._set_exit_guard(False)
         with self.root:
             render_register(self, error)
+
+    def show_predefined_sets(self) -> None:
+        """Open the online authoring form for eligible managers."""
+        if not can_manage_predefined_sets(self.current_user):
+            self.show_profile()
+            return
+        self.active_screen = "predefined_sets"
+        self._clear()
+        self._set_exit_guard(False)
+        with self.root:
+            render_predefined_sets(self)
 
     def show_admin(self) -> None:
         """Navigate to the Admin Panel screen (DEVELOPER role only)."""

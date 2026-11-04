@@ -5,12 +5,38 @@ from decimal import Decimal
 
 import pytest
 from sqlalchemy import event
+from sqlalchemy.dialects import mssql
+from sqlalchemy.sql import Select
 
 from app.core.security import create_access_token
 from app.models.experiment import Dataset
 from app.models.user import AppUser
 
 URL = "/api/v1/datasets"
+
+
+def test_catalog_uses_sql_server_compatible_bit_comparison(
+    client, sqlite_engine, sqlite_session, account,
+):
+    add_dataset(sqlite_session, account, "iris")
+    statements = []
+
+    def capture(_conn, clause, _multiparams, _params, _options):
+        if isinstance(clause, Select):
+            sql = str(clause.compile(dialect=mssql.dialect()))
+            if "FROM dahlia.dataset" in sql:
+                statements.append(sql)
+
+    event.listen(sqlite_engine, "before_execute", capture)
+    try:
+        response = client.get(URL, headers=headers(account))
+    finally:
+        event.remove(sqlite_engine, "before_execute", capture)
+    assert response.status_code == 200
+    assert response.json()[0]["name"] == "iris"
+    assert len(statements) == 1
+    assert "dataset.is_active = 1" in statements[0]
+    assert "dataset.is_active IS 1" not in statements[0]
 
 
 @pytest.fixture

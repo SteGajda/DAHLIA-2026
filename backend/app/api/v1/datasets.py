@@ -1,7 +1,7 @@
 """Read-only central dataset catalog for predefined set managers."""
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import select
+from sqlalchemy import select, true
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_predefined_set_manager
@@ -25,7 +25,7 @@ def list_datasets(
     """
     rows = db.execute(
         select(Dataset.dataset_id, Dataset.name, Dataset.row_count)
-        .where(Dataset.is_active.is_(True))
+        .where(Dataset.is_active == true())
         .order_by(Dataset.dataset_id)
     ).all()
     return [DatasetSummary(dataset_id=row.dataset_id, name=row.name,

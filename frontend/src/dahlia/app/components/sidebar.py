@@ -7,6 +7,7 @@ from typing import Any
 from nicegui import ui
 
 from dahlia.services.config import APP_VERSION
+from dahlia.services.predefined_sets import can_manage_predefined_sets
 
 
 def _format_status_badge(is_online: bool) -> str:
@@ -54,6 +55,13 @@ def render_sidebar(controller: Any, active: str) -> None:
                 is_active=(active == "my_results"),
                 on_click=controller.show_my_results,
             )
+            if can_manage_predefined_sets(controller.current_user):
+                _nav_item(
+                    icon="playlist_add",
+                    label="Predefined Sets",
+                    is_active=(active == "predefined_sets"),
+                    on_click=controller.show_predefined_sets,
+                )
             if controller.current_user and controller.current_user.get("role") == "DEVELOPER":
                 _nav_item(
                     icon="admin_panel_settings",

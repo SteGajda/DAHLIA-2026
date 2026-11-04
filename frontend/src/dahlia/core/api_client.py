@@ -357,6 +357,10 @@ class ApiClient:
             json={"token": token, "new_password": new_password},
         )
 
+    async def list_active_datasets(self) -> ApiResult:
+        """Fetch authoring metadata through the authenticated backend API."""
+        return await self._request("GET", "/api/v1/datasets", auth=True)
+
     # Admin endpoints (requires DEVELOPER role)
     async def list_role_requests(self) -> ApiResult:
         """List pending role upgrade requests."""
