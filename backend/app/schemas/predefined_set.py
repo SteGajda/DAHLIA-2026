@@ -24,3 +24,15 @@ class PredefinedSetDefinition(BaseModel):
     created_by: int
     created_at: datetime
     is_active: bool
+
+
+class PredefinedSetSummary(BaseModel):
+    """Management list metadata; point arrays are loaded only on detail request."""
+
+    predefined_set_id: int
+    dataset_id: int
+    dataset_name: str
+    na_fraction: float
+    created_by: int
+    created_at: datetime
+    is_active: bool
