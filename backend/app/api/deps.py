@@ -96,6 +96,23 @@ def get_verified_user(
     return current_user
 
 
+def require_predefined_set_manager(
+    current_user: AppUser = Depends(get_current_user),
+) -> AppUser:
+    """Require an active, verified researcher/developer in current DB state.
+
+    get_current_user rejects inactive accounts. Individual SQL read access is
+    unrelated to this API permission; the backend uses its own DB connection.
+    """
+    if not current_user.is_email_verified:
+        raise HTTPException(status_code=403,
+                            detail="Please verify your email address before managing predefined sets.")
+    if current_user.role_code not in {"RESEARCHER", "DEVELOPER"}:
+        raise HTTPException(status_code=403,
+                            detail="Predefined set management requires RESEARCHER or DEVELOPER role.")
+    return current_user
+
+
 def require_role(*roles: str):
     """Return a dependency that enforces one of the given ``role_code`` values.
 
