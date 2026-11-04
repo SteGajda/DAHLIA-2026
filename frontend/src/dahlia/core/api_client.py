@@ -361,6 +361,10 @@ class ApiClient:
         """Fetch authoring metadata through the authenticated backend API."""
         return await self._request("GET", "/api/v1/datasets", auth=True)
 
+    async def create_predefined_set(self, payload: dict[str, Any]) -> ApiResult:
+        """Save one approved definition; never retry a creation automatically."""
+        return await self._request("POST", "/api/v1/predefined-sets", json=payload, auth=True)
+
     # Admin endpoints (requires DEVELOPER role)
     async def list_role_requests(self) -> ApiResult:
         """List pending role upgrade requests."""

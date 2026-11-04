@@ -5,7 +5,10 @@ import random
 import re
 from typing import Any
 
-from .config import NA_FRACTIONS, TOTAL_STEPS
+import pandas as pd
+
+from dahlia.datasets import ExperimentSampler
+from .config import MAX_SEED, NA_FRACTIONS, TOTAL_STEPS
 
 
 def can_manage_predefined_sets(user: dict | None) -> bool:
@@ -60,6 +63,15 @@ class PredefinedPreview:
     removed_indices: tuple[int, ...]
     annotation_indices: tuple[int, ...]
 
+    def to_payload(self) -> dict:
+        """Copy the approved definition; generation seed is not part of a set."""
+        return {
+            "dataset_id": self.dataset.dataset_id,
+            "na_fraction": self.na_fraction,
+            "removed_indices": list(self.removed_indices),
+            "annotation_indices": list(self.annotation_indices),
+        }
+
 
 class PredefinedDraft:
     """An unsaved form; configuration/input changes invalidate its preview."""
@@ -98,6 +110,25 @@ class PredefinedDraft:
 
     def set_annotation_text(self, value: str) -> None:
         self.annotation_text = value
+        self.preview = None
+
+    def generate_from_seed(self, raw_seed: str) -> None:
+        """Use the existing sampler on the central dataset's zero-based positions."""
+        if self.dataset is None:
+            raise ValueError("Select a dataset.")
+        if self.missing_count < TOTAL_STEPS:
+            raise ValueError("This fraction produces fewer than 15 missing points.")
+        text = raw_seed.strip()
+        if not re.fullmatch(r"[0-9]+", text) or int(text) > MAX_SEED:
+            raise ValueError(f"Seed must be an integer between 0 and {MAX_SEED}.")
+        # ExperimentSampler uses only df.index and len(df); no CSV values or
+        # local DatasetConfig are needed, so every central dataset is supported.
+        frame = pd.DataFrame(index=pd.RangeIndex(self.dataset.row_count))
+        removed, annotations = ExperimentSampler(int(text)).select_experiment_points(
+            frame, na_fraction=self.na_fraction, n_imputation_steps=TOTAL_STEPS,
+        )
+        self.removed_text = ", ".join(str(int(index)) for index in removed)
+        self.annotation_text = ", ".join(str(int(index)) for index in annotations)
         self.preview = None
 
     def prepare_preview(self) -> PredefinedPreview:

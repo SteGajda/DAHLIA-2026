@@ -1,11 +1,11 @@
-"""Online predefined set form and unsaved 15-point preview."""
+"""Online predefined set authoring, preview and explicit save."""
 
 from typing import Any
 
 from nicegui import ui
 
 from dahlia.app.components.layout import sidebar_page
-from dahlia.services.config import NA_FRACTIONS
+from dahlia.services.config import MAX_SEED, NA_FRACTIONS
 from dahlia.services.predefined_sets import (
     PredefinedDraft, can_manage_predefined_sets, parse_dataset_catalog,
 )
@@ -17,6 +17,9 @@ def render_predefined_sets(controller: Any) -> None:
         return
     draft = PredefinedDraft()
     catalog = {}
+    saving = False
+    saved_preview = None
+    saved_set_id = None
     marker = object()
     controller._predefined_screen_marker = marker
     owner = controller.current_user.get("user_id")
@@ -42,6 +45,11 @@ def render_predefined_sets(controller: Any) -> None:
                         list(NA_FRACTIONS), value=draft.na_fraction, label="NA fraction",
                     ).props("outlined dense").classes("w-full")
                     hint = ui.label("Select a dataset to see the required count and index range.").classes("text-sm dahlia-muted")
+                    with ui.row().classes("w-full items-start gap-3"):
+                        seed_input = ui.input(label="Generation seed (optional)", value="").props(
+                            f"outlined dense type=number min=0 max={MAX_SEED} step=1"
+                        ).classes("flex-1")
+                        generate = ui.button("Generate lists", icon="casino").props("outline no-caps")
                     removed_input = ui.textarea(label="All removed row indices", value="").props(
                         "outlined rows=3 placeholder=\"0, 1, 2, ...\""
                     ).classes("w-full dahlia-mono")
@@ -54,14 +62,21 @@ def render_predefined_sets(controller: Any) -> None:
                     prepare = ui.button("Prepare preview").props("no-caps").classes("dahlia-primary-btn")
                 preview = ui.column().classes("w-full gap-3 rounded-lg border p-6 bg-white")
                 preview.set_visibility(False)
+                with ui.column().classes("w-full gap-2") as save_area:
+                    save_button = ui.button("Save set", icon="save").props("no-caps").classes("dahlia-primary-btn")
+                    save_message = ui.label("").classes("text-sm dahlia-muted")
+                save_area.set_visibility(False)
 
-    controls = [dataset_select, fraction_select, removed_input, annotation_input, prepare]
+    controls = [dataset_select, fraction_select, seed_input, generate,
+                removed_input, annotation_input, prepare]
     for control in controls:
         control.disable()
 
     def invalidate() -> None:
         preview.clear()
         preview.set_visibility(False)
+        save_area.set_visibility(False)
+        save_message.set_text("")
         error.set_text("")
         error.set_visibility(False)
 
@@ -74,6 +89,7 @@ def render_predefined_sets(controller: Any) -> None:
         if draft.dataset is None:
             hint.set_text("Select a dataset to see the required count and index range.")
             prepare.disable()
+            generate.disable()
             return
         hint.set_text(f"Enter exactly {draft.missing_count} removed indices. "
                       f"Allowed row_index: 0-{draft.dataset.row_count - 1} "
@@ -82,8 +98,10 @@ def render_predefined_sets(controller: Any) -> None:
             error.set_text("This fraction produces fewer than 15 missing points. Choose another configuration.")
             error.set_visibility(True)
             prepare.disable()
+            generate.disable()
         else:
             prepare.enable()
+            generate.enable()
 
     def change_removed(event: Any) -> None:
         value = str(event.value or "")
@@ -98,7 +116,7 @@ def render_predefined_sets(controller: Any) -> None:
             invalidate()
 
     def prepare_preview() -> None:
-        if not still_current():
+        if saving or not still_current():
             return
         invalidate()
         try:
@@ -118,11 +136,70 @@ def render_predefined_sets(controller: Any) -> None:
                     ui.label(f"{order}.  row {index}").classes(
                         "dahlia-mono text-sm rounded border px-3 py-2"
                     )
-            ui.label("Preview only - this set has not been saved.").classes("text-sm dahlia-muted")
+            ui.label("Review the evaluation order before saving.").classes("text-sm dahlia-muted")
         preview.set_visibility(True)
+        save_area.set_visibility(True)
+        if result == saved_preview:
+            save_button.disable()
+            save_message.set_text(f"Set #{saved_set_id} saved and active.")
+        else:
+            save_button.enable()
+            save_message.set_text("This definition has not been saved yet.")
+
+    def generate_lists() -> None:
+        if saving or not still_current():
+            return
+        try:
+            draft.generate_from_seed(str(seed_input.value if seed_input.value is not None else ""))
+        except ValueError as exc:
+            error.set_text(str(exc))
+            error.set_visibility(True)
+            return
+        removed_input.value = draft.removed_text
+        annotation_input.value = draft.annotation_text
+        invalidate()
+
+    async def save_set() -> None:
+        nonlocal saving, saved_preview, saved_set_id
+        snapshot = draft.preview
+        if saving or not still_current() or snapshot is None or snapshot == saved_preview:
+            return
+        saving = True
+        refresh.disable()
+        for control in controls:
+            control.disable()
+        save_button.disable()
+        save_button.props("loading")
+        save_message.set_text("Saving set...")
+        try:
+            res = await controller.api_client.create_predefined_set(snapshot.to_payload())
+            if not still_current():
+                return
+            controller.is_online = not res.is_offline
+            controller._update_status_badge()
+            data = res.data if isinstance(res.data, dict) else {}
+            set_id = data.get("predefined_set_id")
+            if res.success and type(set_id) is int and set_id > 0:
+                saved_preview, saved_set_id = snapshot, set_id
+                save_message.set_text(f"Set #{set_id} saved and active.")
+            elif res.is_offline:
+                save_message.set_text("Save could not be confirmed. Your point lists have been kept.")
+            elif res.status_code == 401:
+                save_message.set_text("Your session has expired. Sign in again from Profile.")
+            else:
+                save_message.set_text(res.error or "Save could not be confirmed. Your point lists have been kept.")
+        finally:
+            saving = False
+            if still_current():
+                save_button.props(remove="loading")
+                refresh.enable()
+                for control in controls:
+                    control.enable()
+                if draft.preview != saved_preview:
+                    save_button.enable()
 
     async def load_datasets() -> None:
-        if not still_current():
+        if saving or not still_current():
             return
         refresh.disable()
         for control in controls:
@@ -166,6 +243,7 @@ def render_predefined_sets(controller: Any) -> None:
         for control in controls:
             control.enable()
         prepare.disable()
+        generate.disable()
         status.set_text("Choose a dataset and prepare the point lists.")
 
     dataset_select.on_value_change(lambda _: update_configuration())
@@ -173,5 +251,7 @@ def render_predefined_sets(controller: Any) -> None:
     removed_input.on_value_change(change_removed)
     annotation_input.on_value_change(change_annotations)
     prepare.on_click(prepare_preview)
+    generate.on_click(generate_lists)
+    save_button.on_click(save_set)
     refresh.on_click(load_datasets)
     ui.timer(0.01, load_datasets, once=True)
