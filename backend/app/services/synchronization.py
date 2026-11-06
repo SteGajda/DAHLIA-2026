@@ -81,7 +81,8 @@ def _validate_dataset(db: Session, payload: CompletedExperiment) -> Dataset:
         raise HTTPException(500, detail='Central dataset cannot be read.') from exc
     if payload.source_type == 'PREDEFINED':
         predefined = db.get(PredefinedSet, payload.predefined_set_id)
-        if (predefined is None or not predefined.is_active
+        # Deactivation affects future selection, not upload of completed runs.
+        if (predefined is None
                 or predefined.dataset_id != dataset.dataset_id
                 or predefined.na_fraction != Decimal(str(payload.na_fraction))):
             _invalid('Predefined set does not match the experiment.')

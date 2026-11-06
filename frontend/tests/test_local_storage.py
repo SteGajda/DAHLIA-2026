@@ -189,6 +189,8 @@ def test_controller_local_storage_lifecycle() -> None:
     mock_exp.config.name = "iris"
     mock_exp.config = IRIS_CONFIG
     mock_exp.seed = 42
+    mock_exp.source_type = "SEEDED"
+    mock_exp.predefined_set_id = None
     mock_exp.na_fraction = 0.1
     mock_exp.projection_name = "tsne"
     mock_exp.answers = {5: 3.14}

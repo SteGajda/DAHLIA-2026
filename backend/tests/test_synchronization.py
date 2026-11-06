@@ -173,3 +173,57 @@ def test_failure_after_point_inserts_rolls_back_everything(client, sqlite_sessio
         assert count(sqlite_session, model) == 0
     retry = client.post('/api/v1/sync/experiment', json=payload, headers=headers)
     assert retry.status_code == 201
+
+
+@pytest.fixture
+def predefined_upload(client, sqlite_session, upload):
+    payload, headers, _ = upload
+    user = sqlite_session.get(AppUser, payload['user_id'])
+    user.role_code = 'RESEARCHER'
+    sqlite_session.commit()
+    dataset = sqlite_session.scalar(select(Dataset))
+    response = client.post('/api/v1/predefined-sets', headers=headers, json=dict(
+        dataset_id=dataset.dataset_id, na_fraction=0.2,
+        removed_indices=payload['removed_indices'], annotation_indices=payload['annotation_indices'],
+    ))
+    assert response.status_code == 201
+    set_id = response.json()['predefined_set_id']
+    payload.update(source_type='PREDEFINED', seed=None, predefined_set_id=set_id)
+    return payload, headers
+
+
+@pytest.mark.parametrize('already_uploaded', [False, True])
+def test_deactivated_set_accepts_earlier_results_and_retries(client, sqlite_session, predefined_upload, already_uploaded):
+    payload, headers = predefined_upload
+    if already_uploaded:
+        assert client.post('/api/v1/sync/experiment', headers=headers, json=payload).status_code == 201
+    assert client.post(f"/api/v1/predefined-sets/{payload['predefined_set_id']}/deactivate", headers=headers).status_code == 200
+    response = client.post('/api/v1/sync/experiment', headers=headers, json=payload)
+    assert response.status_code == (200 if already_uploaded else 201), response.text
+    record = sqlite_session.scalar(select(Experiment))
+    assert record.seed is None and record.predefined_set_id == payload['predefined_set_id']
+    assert client.post('/api/v1/sync/experiment', headers=headers, json=payload).status_code == 200
+    assert count(sqlite_session, Experiment) == 1
+    assert count(sqlite_session, ExperimentPoint) == 30
+    assert count(sqlite_session, PointPrediction) == 195
+    assert count(sqlite_session, ExperimentResult) == 7
+
+
+@pytest.mark.parametrize('problem', ['order', 'points', 'unknown'])
+def test_deactivation_does_not_bypass_definition_validation(client, sqlite_session, predefined_upload, problem):
+    payload, headers = predefined_upload
+    assert client.post(f"/api/v1/predefined-sets/{payload['predefined_set_id']}/deactivate", headers=headers).status_code == 200
+    if problem == 'order':
+        payload['annotation_indices'].reverse()
+    elif problem == 'points':
+        payload['removed_indices'][-1] = 30
+        payload['true_values']['30'] = 7.0
+        del payload['true_values']['29']
+        for values in payload['algorithm_predictions'].values():
+            values['30'] = 7.2
+            del values['29']
+    else:
+        payload['predefined_set_id'] += 100
+    response = client.post('/api/v1/sync/experiment', headers=headers, json=payload)
+    assert response.status_code == 422, response.text
+    assert count(sqlite_session, Experiment) == 0

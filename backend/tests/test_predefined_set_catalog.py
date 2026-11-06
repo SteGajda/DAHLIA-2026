@@ -54,7 +54,9 @@ def definitions(sqlite_session, manager):
         annotation_indices=[21, 2, 29, 0, 14, 7, 9, 8, 11, 10, 18, 16, 3, 22, 5],
     )
     first = create_predefined_set(sqlite_session, payload, manager)
-    second = create_predefined_set(sqlite_session, payload, other)
+    # The catalog contains distinct definitions; active duplicates are rejected.
+    second_payload = payload.model_copy(update={"annotation_indices": list(reversed(payload.annotation_indices))})
+    second = create_predefined_set(sqlite_session, second_payload, other)
     saved = sqlite_session.get(PredefinedSet, second.predefined_set_id)
     saved.is_active = False
     sqlite_session.commit()
@@ -196,3 +198,104 @@ def test_reads_do_not_write_and_list_does_not_load_points_or_csv(
     assert not any(sql.startswith(("insert ", "update ", "delete ")) for sql in statements)
     assert not any("predefined_set_point" in sql for sql in list_statements)
     assert not any("csv_file" in sql for sql in statements)
+
+
+def test_public_selection_excludes_inactive_sets_and_private_metadata(client, manager, definitions):
+    first, _ = definitions
+    response = client.get(f"{URL}/available")
+    assert response.status_code == 200
+    assert response.json() == [dict(predefined_set_id=first.predefined_set_id,
+        dataset_id=first.dataset_id, dataset_name="iris", na_fraction=0.2, is_active=True)]
+    # Public read does not grant access to the management catalog or detail.
+    assert client.get(URL).status_code in (401, 403)
+    assert client.get(f"{URL}/{first.predefined_set_id}").status_code in (401, 403)
+    assert client.post(f"{URL}/{first.predefined_set_id}/deactivate").status_code in (401, 403)
+
+
+def test_public_selection_excludes_inactive_dataset(client, sqlite_session, manager, definitions):
+    first, _ = definitions
+    sqlite_session.get(Dataset, first.dataset_id).is_active = False
+    sqlite_session.commit()
+    assert client.get(f"{URL}/available").json() == []
+
+
+def test_public_selection_refresh_removes_deactivated_set(client, manager, definitions):
+    first, _ = definitions
+    assert len(client.get(f"{URL}/available").json()) == 1
+    assert client.post(f"{URL}/{first.predefined_set_id}/deactivate", headers=headers(manager)).status_code == 200
+    assert client.get(f"{URL}/available").json() == []
+
+
+def test_public_selection_sqlserver_comparisons(client, sqlite_engine, definitions):
+    from sqlalchemy.dialects import mssql
+    statements = []
+    def capture(_conn, clause, _multiparams, _params, _options):
+        statements.append(str(clause.compile(dialect=mssql.dialect())))
+    event.listen(sqlite_engine, "before_execute", capture)
+    try:
+        assert client.get(f"{URL}/available").status_code == 200
+    finally:
+        event.remove(sqlite_engine, "before_execute", capture)
+    assert len(statements) == 1
+    assert "predefined_set.is_active = 1" in statements[0]
+    assert "dataset.is_active = 1" in statements[0]
+    assert "csv_file" not in statements[0]
+
+
+def test_public_execution_package_contains_exact_points_and_checked_csv(client, definitions):
+    import base64
+    first, _ = definitions
+    response = client.get(f"{URL}/{first.predefined_set_id}/execution")
+    assert response.status_code == 200
+    data = response.json()
+    assert data['removed_indices'] == first.removed_indices
+    assert data['annotation_indices'] == first.annotation_indices
+    assert hashlib.sha256(base64.b64decode(data['csv_base64'])).hexdigest() == data['csv_sha256']
+    assert 'created_by' not in data and 'created_at' not in data
+
+
+def test_inactive_execution_package_is_rejected(client, manager, definitions):
+    _, inactive = definitions
+    assert client.get(f"{URL}/{inactive.predefined_set_id}/execution").status_code == 409
+    assert client.get(f"{URL}/999/execution").status_code == 404
+
+
+def test_execution_package_rejects_inactive_or_corrupt_dataset(client, sqlite_session, definitions):
+    first, _ = definitions
+    dataset = sqlite_session.get(Dataset, first.dataset_id)
+    dataset.is_active = False
+    sqlite_session.commit()
+    assert client.get(f"{URL}/{first.predefined_set_id}/execution").status_code == 409
+    dataset.is_active = True
+    dataset.csv_file = b'changed'
+    sqlite_session.commit()
+    assert client.get(f"{URL}/{first.predefined_set_id}/execution").status_code == 500
+
+
+def test_offline_catalog_identity_matches_package_and_survives_deactivation(client, manager, definitions):
+    first, _ = definitions
+    response = client.get(f"{URL}/offline-catalog")
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data['catalog_id']) == 64
+    assert [item['predefined_set_id'] for item in data['sets']] == [first.predefined_set_id]
+    package = client.get(f"{URL}/{first.predefined_set_id}/execution").json()
+    assert package['catalog_id'] == data['catalog_id']
+    assert 'created_by' not in data['sets'][0] and 'csv_base64' not in data['sets'][0]
+    assert client.post(f"{URL}/{first.predefined_set_id}/deactivate", headers=headers(manager)).status_code == 200
+    assert client.get(f"{URL}/offline-catalog").json() == dict(catalog_id=data['catalog_id'], sets=[])
+
+
+def test_catalog_identity_distinguishes_sql_server_and_database():
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from app.services.predefined_set_catalog import get_catalog_id
+    db = Mock()
+    db.get_bind.return_value = SimpleNamespace(dialect=SimpleNamespace(name='mssql'))
+    db.execute.return_value.one.return_value = ('local-server', 'DAHLIA_DEV')
+    local = get_catalog_id(db)
+    assert get_catalog_id(db) == local
+    db.execute.return_value.one.return_value = ('azure-server', 'DAHLIA_DEV')
+    assert get_catalog_id(db) != local
+    db.execute.return_value.one.return_value = ('local-server', 'DAHLIA')
+    assert get_catalog_id(db) != local

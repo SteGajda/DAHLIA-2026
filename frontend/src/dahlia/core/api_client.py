@@ -361,6 +361,28 @@ class ApiClient:
         """Fetch authoring metadata through the authenticated backend API."""
         return await self._request("GET", "/api/v1/datasets", auth=True)
 
+    async def get_offline_set_catalog(self) -> ApiResult:
+        return await self._request("GET", "/api/v1/predefined-sets/offline-catalog", auth=False)
+
+    async def get_execution_set(self, set_id: int) -> ApiResult:
+        return await self._request("GET", f"/api/v1/predefined-sets/{set_id}/execution", auth=False)
+
+    async def list_available_predefined_sets(self) -> ApiResult:
+        """Public catalog for experiment selection, also available anonymously."""
+        return await self._request("GET", "/api/v1/predefined-sets/available", auth=False)
+
+    async def list_predefined_sets(self) -> ApiResult:
+        """List all sets available to an authenticated manager."""
+        return await self._request("GET", "/api/v1/predefined-sets", auth=True)
+
+    async def get_predefined_set(self, set_id: int) -> ApiResult:
+        """Read the persisted point lists without generating new points."""
+        return await self._request("GET", f"/api/v1/predefined-sets/{set_id}", auth=True)
+
+    async def deactivate_predefined_set(self, set_id: int) -> ApiResult:
+        """Deactivate through the backend; no definition or results are deleted."""
+        return await self._request("POST", f"/api/v1/predefined-sets/{set_id}/deactivate", auth=True)
+
     async def create_predefined_set(self, payload: dict[str, Any]) -> ApiResult:
         """Save one approved definition; never retry a creation automatically."""
         return await self._request("POST", "/api/v1/predefined-sets", json=payload, auth=True)

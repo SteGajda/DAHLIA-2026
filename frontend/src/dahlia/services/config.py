@@ -50,6 +50,22 @@ IRIS_CONFIG = DatasetConfig(
     categorical_columns=("Species",),
 )
 
-DATASETS = {IRIS_CONFIG.name: IRIS_CONFIG}
+WOLA_CONFIG = DatasetConfig(
+    name="wola", path=Path("data/wola.csv"), precision=0.001,
+    incomplete_column="[Mg %]", target_column="[LABELS]",
+    number_of_clusters=3, knn_number_of_neighbors=5,
+    reference_columns=("[Mn %]", "[C %]", "[Si %]", "[Cr %]", "[Ni %]", "[Cu %]"),
+    categorical_columns=(),
+)
+
+STAMP_TYPE_CONFIG = DatasetConfig(
+    name="stamp_type", path=Path("data/stamp_type.csv"), precision=0.01,
+    incomplete_column="MEANS OF AMPLITUDE", target_column="LABEL",
+    number_of_clusters=11, knn_number_of_neighbors=3,
+    reference_columns=("MEANS OF AVE. FREQ.", "TOTAL AE ENERGY", "No. OF COUNTS", "No. OF HITS", "TOTAL TRUE ENERGY", "MEANS OF RISE FREQ."),
+    categorical_columns=("VENDOR", "STAMP TYPE"),
+)
+
+DATASETS = {config.name: config for config in (IRIS_CONFIG, WOLA_CONFIG, STAMP_TYPE_CONFIG)}
 NA_FRACTIONS = (0.1, 0.2, 0.3)
 PROJECTIONS = ("tsne", "pca", "umap")

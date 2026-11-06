@@ -39,6 +39,7 @@ from dahlia.services import (
 )
 from dahlia.services.experiment import build_storage_details, precision_digits
 from dahlia.services.predefined_sets import can_manage_predefined_sets
+from dahlia.services.predefined_cache import PredefinedCache
 
 LOGGER = logging.getLogger(__name__)
 
@@ -54,8 +55,11 @@ class AppController:
         self.root = root
         self.monitor_timer: Any | None = None
         self._syncing_prediction = False
+        self._preparing_experiment = False
 
         self.seed = 0
+        self.experiment_source = "SEEDED"
+        self.predefined_selection = None
         self.dataset_name = "iris"
         self.na_fraction = 0.1
         self.projection_name = "tsne"
@@ -72,6 +76,7 @@ class AppController:
         # Navigation and persistent storage state
         self.active_screen: str = "setup"
         self.storage: LocalStorage = storage or LocalStorage()
+        self.predefined_cache = PredefinedCache(self.storage)
         self.local_experiments: list[dict] = self.storage.get_experiments()
         self.current_user: dict | None = None
         self.api_client: ApiClient = ApiClient()
@@ -125,6 +130,8 @@ class AppController:
         """Navigate to the Setup screen, optionally resetting all form defaults."""
         if reset_defaults:
             self.seed = 0
+            self.experiment_source = "SEEDED"
+            self.predefined_selection = None
             self.dataset_name = "iris"
             self.na_fraction = 0.1
             self.projection_name = "tsne"
@@ -213,14 +220,27 @@ class AppController:
         Disables the form controls and shows a loading overlay while the
         dataset and projection are computed in a background thread.
         """
-        message = self.set_seed_text(
-            self.setup_elements.get("seed_input").value
-            if self.setup_elements.get("seed_input") is not None
-            else self.seed
-        )
-        if message:
+        if self._preparing_experiment:
             return
-
+        source_toggle = self.setup_elements.get("source_toggle")
+        mode = source_toggle.value if source_toggle is not None else self.experiment_source
+        selection = self.predefined_selection
+        if mode == "PREDEFINED" and selection is None:
+            ui.notify("Select an active predefined set.", type="warning")
+            return
+        if mode == "SEEDED":
+            message = self.set_seed_text(
+                self.setup_elements["seed_input"].value if self.setup_elements.get("seed_input") is not None else self.seed
+            )
+            if message:
+                return
+        elif mode != "PREDEFINED":
+            return
+        seed, fraction, dataset_name, projection = self.seed, self.na_fraction, self.dataset_name, self.projection_name
+        marker = getattr(self, "_setup_screen_marker", None)
+        def current():
+            return self.active_screen == "setup" and getattr(self, "_setup_screen_marker", None) is marker
+        self._preparing_experiment = True
         controls = self.setup_elements.get("controls", [])
         overlay = self.setup_elements.get("loading_overlay")
         for control in controls:
@@ -228,25 +248,50 @@ class AppController:
         if overlay is not None:
             overlay.set_visibility(True)
         self._set_exit_guard(True)
-        await asyncio.sleep(0)
-
         try:
+            bundle = None
+            if mode == "PREDEFINED":
+                res = await self.api_client.get_execution_set(selection.predefined_set_id)
+                if not current():
+                    return
+                self.is_online = not res.is_offline
+                self._update_status_badge()
+                if res.is_offline:
+                    bundle = self.predefined_cache.get(self.api_client.base_url, selection.predefined_set_id)
+                    if bundle is None:
+                        raise ValueError("This set is not downloaded. Connect to the internet and download it first.")
+                elif not res.success:
+                    if res.status_code in (404, 409):
+                        self.predefined_cache.unavailable(self.api_client.base_url, selection.predefined_set_id)
+                    raise ValueError(res.error or "Could not load the set.")
+                else:
+                    bundle = res.data
+                    known_catalog = self.predefined_cache.catalog_id(self.api_client.base_url)
+                    if known_catalog is not None and (not isinstance(bundle, dict) or bundle.get("catalog_id") != known_catalog):
+                        if isinstance(bundle, dict):
+                            self.predefined_cache.refresh(self.api_client.base_url, {"catalog_id": bundle.get("catalog_id"), "sets": []})
+                        raise ValueError("The database catalog changed. Refresh sets before starting.")
+                if (not isinstance(bundle, dict) or bundle.get("predefined_set_id") != selection.predefined_set_id
+                        or bundle.get("dataset_id") != selection.dataset_id or bundle.get("dataset_name") != selection.dataset_name
+                        or bundle.get("na_fraction") != selection.na_fraction or bundle.get("is_active") is not True):
+                    raise ValueError("The selected set does not match the server definition. Refresh the catalog.")
+                dataset_name, fraction, seed = selection.dataset_name, selection.na_fraction, 0
+            if dataset_name not in DATASETS:
+                raise ValueError("This dataset has no method configuration in this application version.")
             experiment = await asyncio.to_thread(
-                prepare_experiment,
-                DATASETS[self.dataset_name],
-                self.seed,
-                self.na_fraction,
-                self.projection_name,
+                prepare_experiment, DATASETS[dataset_name], seed, fraction, projection,
+                **({"predefined_bundle": bundle} if bundle is not None else {}),
             )
+            if not current():
+                return
             prediction_future = start_algorithm_predictions(experiment)
         except Exception as exc:
             LOGGER.exception("Experiment preparation failed")
-            self.show_setup(
-                f"The experiment could not be prepared. {exc}",
-                reset_defaults=False,
-            )
+            if current():
+                self.show_setup(f"The experiment could not be prepared. {exc}", reset_defaults=False)
             return
-
+        finally:
+            self._preparing_experiment = False
         self.experiment = experiment
         self._saved_experiment_uid = None
         self.prediction_future = prediction_future
@@ -490,7 +535,9 @@ class AppController:
 
         self._saved_experiment_uid = self.storage.save_experiment(
             dataset_name=self.experiment.config.name,
-            seed=self.experiment.seed,
+            seed=None if self.experiment.source_type == "PREDEFINED" else self.experiment.seed,
+            source_type=self.experiment.source_type,
+            predefined_set_id=self.experiment.predefined_set_id,
             na_fraction=self.experiment.na_fraction,
             projection=self.experiment.projection_name,
             results_df=self.results.copy(),
@@ -545,6 +592,8 @@ class AppController:
                         "date": exp["date"],
                         "dataset": exp["dataset"],
                         "seed": exp["seed"],
+                        "source_type": exp.get("source_type", "SEEDED"),
+                        "predefined_set_id": exp.get("predefined_set_id"),
                         "na_fraction": exp["na_fraction"],
                         "projection": exp["projection"],
                         "method": str(row.Method),
@@ -588,6 +637,8 @@ class AppController:
                         "date": exp["date"],
                         "dataset": exp["dataset"],
                         "seed": exp["seed"],
+                        "source_type": exp.get("source_type", "SEEDED"),
+                        "predefined_set_id": exp.get("predefined_set_id"),
                         "na_fraction": exp["na_fraction"],
                         "projection": exp["projection"],
                         "annotation_index": idx,

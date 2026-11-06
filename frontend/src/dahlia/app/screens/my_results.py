@@ -239,7 +239,7 @@ def _render_table(controller: Any, experiments: list[dict]) -> None:
                 ui.label(exp["dataset"]).classes("text-sm dahlia-mono").style(
                     f"width: {_COLUMNS[1][1]}; min-width: {_COLUMNS[1][1]}; flex-shrink: 0"
                 )
-                ui.label(str(exp["seed"])).classes("text-sm dahlia-mono").style(
+                ui.label(f"Set #{exp['predefined_set_id']}" if exp.get("source_type") == "PREDEFINED" else str(exp["seed"])).classes("text-sm dahlia-mono").style(
                     f"width: {_COLUMNS[2][1]}; min-width: {_COLUMNS[2][1]}; flex-shrink: 0"
                 )
                 ui.label(str(exp["na_fraction"])).classes("text-sm dahlia-mono").style(
@@ -289,7 +289,7 @@ def _open_results_dialog(exp: dict) -> None:
     with dialog, ui.card().classes("dahlia-modal-card gap-3"):
         with ui.row().classes("items-center justify-between w-full"):
             ui.label(
-                f"{exp['dataset']} · seed {exp['seed']} · {exp['date']}"
+                f"{exp['dataset']} · " + (f"Set #{exp['predefined_set_id']}" if exp.get('source_type') == 'PREDEFINED' else f"seed {exp['seed']}") + f" · {exp['date']}"
             ).classes("text-sm font-medium")
             ui.button(icon="close", on_click=dialog.close).props(
                 "flat round dense"

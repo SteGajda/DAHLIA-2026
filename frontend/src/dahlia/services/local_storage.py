@@ -75,25 +75,48 @@ class LocalStorage:
         return conn
 
     def _init_db(self) -> None:
-        """Create local_experiments table if it does not exist."""
+        """Upgrade the original buffer atomically, preserving UUIDs and JSON bytes."""
         conn = self._get_connection()
+        definition = """(
+            experiment_uid TEXT PRIMARY KEY, created_at TEXT NOT NULL,
+            dataset_name TEXT NOT NULL, seed INTEGER, na_fraction REAL NOT NULL,
+            projection TEXT NOT NULL, user_id INTEGER,
+            sync_status TEXT NOT NULL DEFAULT 'Local only', payload_json TEXT NOT NULL,
+            source_type TEXT NOT NULL DEFAULT 'SEEDED', predefined_set_id INTEGER,
+            CHECK ((source_type = 'SEEDED' AND seed IS NOT NULL AND predefined_set_id IS NULL)
+                OR (source_type = 'PREDEFINED' AND seed IS NULL AND predefined_set_id > 0
+                    AND predefined_set_id IS NOT NULL))
+        )"""
+        legacy = {"experiment_uid", "created_at", "dataset_name", "seed", "na_fraction",
+                  "projection", "user_id", "sync_status", "payload_json"}
         try:
-            with conn:
-                conn.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS local_experiments (
-                        experiment_uid TEXT PRIMARY KEY,
-                        created_at TEXT NOT NULL,
-                        dataset_name TEXT NOT NULL,
-                        seed INTEGER NOT NULL,
-                        na_fraction REAL NOT NULL,
-                        projection TEXT NOT NULL,
-                        user_id INTEGER,
-                        sync_status TEXT NOT NULL DEFAULT 'Local only',
-                        payload_json TEXT NOT NULL
-                    )
-                    """
-                )
+            info = conn.execute("PRAGMA table_info(local_experiments)").fetchall()
+            columns = {row["name"] for row in info}
+            if columns == legacy:
+                if self._connection_target != ":memory:":
+                    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+                    backup = sqlite3.connect(str(self.db_path) + f".before-predefined-{stamp}.bak")
+                    try:
+                        conn.backup(backup)
+                    finally:
+                        backup.close()
+                with conn:
+                    conn.execute("BEGIN IMMEDIATE")
+                    conn.execute("CREATE TABLE local_experiments_migration " + definition)
+                    conn.execute("""INSERT INTO local_experiments_migration
+                        (experiment_uid, created_at, dataset_name, seed, na_fraction,
+                         projection, user_id, sync_status, payload_json)
+                        SELECT experiment_uid, created_at, dataset_name, seed, na_fraction,
+                               projection, user_id, sync_status, payload_json FROM local_experiments""")
+                    conn.execute("DROP TABLE local_experiments")
+                    conn.execute("ALTER TABLE local_experiments_migration RENAME TO local_experiments")
+            elif not columns:
+                with conn:
+                    conn.execute("CREATE TABLE local_experiments " + definition)
+            elif columns != legacy | {"source_type", "predefined_set_id"} or any(
+                row["name"] == "seed" and row["notnull"] for row in info
+            ):
+                raise ValueError("Unsupported local database schema; the buffer was not changed.")
         finally:
             if self._connection_target != ":memory:":
                 conn.close()
@@ -102,7 +125,7 @@ class LocalStorage:
         self,
         *,
         dataset_name: str,
-        seed: int,
+        seed: int | None,
         na_fraction: float,
         projection: str,
         results_df: pd.DataFrame,
@@ -113,6 +136,8 @@ class LocalStorage:
         sync_status: str = "Local only",
         experiment_uid: str | None = None,
         completed_data: dict[str, Any] | None = None,
+        source_type: str = "SEEDED",
+        predefined_set_id: int | None = None,
     ) -> str:
         """Persist a completed experiment record to SQLite.
 
@@ -125,6 +150,14 @@ class LocalStorage:
         str
             The generated or supplied ``experiment_uid`` (UUID v4 string).
         """
+        if source_type == "SEEDED":
+            valid = type(seed) is int and 0 <= seed <= 2**32 - 1 and predefined_set_id is None
+        elif source_type == "PREDEFINED":
+            valid = seed is None and type(predefined_set_id) is int and predefined_set_id > 0 and completed_data is not None
+        else:
+            valid = False
+        if not valid:
+            raise ValueError("Invalid experiment source, seed or predefined set ID.")
         uid = experiment_uid or str(uuid.uuid4())
         ts = created_at or datetime.now(timezone.utc).isoformat()
 
@@ -136,6 +169,8 @@ class LocalStorage:
             "created_at": ts,
             "dataset_name": dataset_name,
             "seed": seed,
+            "source_type": source_type,
+            "predefined_set_id": predefined_set_id,
             "na_fraction": na_fraction,
             "projection": projection,
             "user_id": user_id,
@@ -169,19 +204,19 @@ class LocalStorage:
                         projection,
                         user_id,
                         sync_status,
-                        payload_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        payload_json, source_type, predefined_set_id
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         uid,
                         ts,
                         dataset_name,
-                        int(seed),
+                        seed,
                         float(na_fraction),
                         projection,
                         user_id,
                         sync_status,
-                        payload_str,
+                        payload_str, source_type, predefined_set_id,
                     ),
                 )
             return uid
@@ -209,7 +244,7 @@ class LocalStorage:
                     projection,
                     user_id,
                     sync_status,
-                    payload_json
+                    payload_json, source_type, predefined_set_id
                 FROM local_experiments
                 ORDER BY created_at DESC
                 """
@@ -226,6 +261,8 @@ class LocalStorage:
                 metrics_records = payload.get("metrics", [])
                 # Records from before versioned payloads remain readable.
                 payload.setdefault("payload_schema_version", 1)
+                payload.setdefault("source_type", row["source_type"])
+                payload.setdefault("predefined_set_id", row["predefined_set_id"])
                 results_df = pd.DataFrame(metrics_records) if metrics_records else pd.DataFrame()
 
                 # Parse display date
@@ -253,6 +290,8 @@ class LocalStorage:
                         "answers": answers_dict,
                         "annotation_indices": payload.get("annotation_indices", []),
                         "payload": payload,
+                        "source_type": row["source_type"],
+                        "predefined_set_id": row["predefined_set_id"],
                     }
                 )
             return experiments

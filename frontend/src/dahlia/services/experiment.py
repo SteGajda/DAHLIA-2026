@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+import base64
+import hashlib
+import io
 from dataclasses import dataclass, field
 from decimal import Decimal
 from importlib.metadata import PackageNotFoundError, version
@@ -24,6 +27,7 @@ from dahlia.imputation import (
 )
 
 from .config import DatasetConfig, METHOD_ORDER, TOTAL_STEPS
+from .predefined_sets import CatalogDataset, PredefinedDraft
 from .data import load_dataset
 from .projection import compute_projection
 
@@ -43,6 +47,8 @@ class PreparedExperiment:
     value_max: float
     display_ticks: tuple[float, ...]
     answers: dict[int, float] = field(default_factory=dict)
+    source_type: str = "SEEDED"
+    predefined_set_id: int | None = None
 
     @property
     def current_step(self) -> int:
@@ -175,19 +181,51 @@ def build_display_ticks(
     return (round(minimum, digits), round(maximum, digits))
 
 
+def load_predefined_data(config: DatasetConfig, na_fraction: float, predefined_bundle: dict):
+    """Verify CSV and complete definition without projecting or sampling."""
+    content = base64.b64decode(predefined_bundle["csv_base64"], validate=True)
+    if hashlib.sha256(content).hexdigest() != predefined_bundle["csv_sha256"]:
+        raise ValueError("Dataset checksum validation failed.")
+    original = pd.read_csv(io.BytesIO(content)).reset_index(drop=True)
+    if len(original) != predefined_bundle["row_count"]:
+        raise ValueError("Central dataset row count does not match the CSV.")
+    expected = (config.incomplete_column, config.target_column, list(config.reference_columns),
+                list(config.categorical_columns), config.precision)
+    actual = tuple(predefined_bundle[key] for key in
+                   ("imputed_column", "target_column", "reference_columns", "categorical_columns", "precision"))
+    if expected != actual or config.name != predefined_bundle["dataset_name"] or na_fraction != predefined_bundle["na_fraction"]:
+        raise ValueError("Central dataset configuration does not match the application's dataset settings.")
+    required = set(config.numeric_model_columns) | set(config.categorical_columns)
+    if config.target_column:
+        required.add(config.target_column)
+    if not required.issubset(original.columns) or original[list(config.numeric_model_columns)].isna().any().any():
+        raise ValueError("Central dataset has missing columns or values.")
+    draft = PredefinedDraft()
+    dataset = CatalogDataset(predefined_bundle["dataset_id"], config.name, len(original))
+    draft.load_definition(predefined_bundle, {dataset.dataset_id: dataset}, expected_id=predefined_bundle["predefined_set_id"])
+    definition = draft.prepare_preview()
+    removed = np.array(definition.removed_indices, dtype=int)
+    annotations = np.array(definition.annotation_indices, dtype=int)
+    return original, removed, annotations
+
+
 def prepare_experiment(
     config: DatasetConfig,
     seed: int,
     na_fraction: float,
     projection_name: str,
+    *,
+    predefined_bundle: dict | None = None,
 ) -> PreparedExperiment:
     """Build all deterministic data needed by the active experiment screen."""
-    original = load_dataset(config)
-    removed, annotations = ExperimentSampler(seed).select_experiment_points(
-        original,
-        na_fraction=na_fraction,
-        n_imputation_steps=TOTAL_STEPS,
-    )
+    if predefined_bundle is None:
+        original = load_dataset(config)
+        removed, annotations = ExperimentSampler(seed).select_experiment_points(
+            original, na_fraction=na_fraction, n_imputation_steps=TOTAL_STEPS,
+        )
+    else:
+        seed = 0
+        original, removed, annotations = load_predefined_data(config, na_fraction, predefined_bundle)
 
     incomplete = original.copy(deep=True)
     incomplete.loc[removed, config.incomplete_column] = np.nan
@@ -226,6 +264,8 @@ def prepare_experiment(
             maximum,
             config.precision,
         ),
+        source_type="PREDEFINED" if predefined_bundle is not None else "SEEDED",
+        predefined_set_id=predefined_bundle["predefined_set_id"] if predefined_bundle is not None else None,
     )
 
 

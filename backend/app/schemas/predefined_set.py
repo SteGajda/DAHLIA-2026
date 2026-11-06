@@ -36,3 +36,36 @@ class PredefinedSetSummary(BaseModel):
     created_by: int
     created_at: datetime
     is_active: bool
+
+
+class PredefinedSetStatus(BaseModel):
+    predefined_set_id: int
+    is_active: bool
+
+
+class AvailablePredefinedSet(BaseModel):
+    """Public selection metadata; account/author details are not exposed."""
+    predefined_set_id: int
+    dataset_id: int
+    dataset_name: str
+    na_fraction: float
+    is_active: Literal[True] = True
+
+
+class PredefinedSetExecution(AvailablePredefinedSet):
+    catalog_id: str
+    removed_indices: list[int]
+    annotation_indices: list[int]
+    row_count: int
+    csv_base64: str
+    csv_sha256: str
+    imputed_column: str
+    target_column: str | None
+    reference_columns: list[str]
+    categorical_columns: list[str]
+    precision: float
+
+
+class OfflineSetCatalog(BaseModel):
+    catalog_id: str
+    sets: list[AvailablePredefinedSet]

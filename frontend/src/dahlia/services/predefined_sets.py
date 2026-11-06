@@ -73,6 +73,37 @@ class PredefinedPreview:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class CatalogSet:
+    predefined_set_id: int
+    dataset_id: int
+    dataset_name: str
+    na_fraction: float
+    is_active: bool
+
+
+def parse_set_catalog(data: Any) -> tuple[CatalogSet, ...]:
+    """Validate manager catalog metadata, including inactive sets."""
+    if not isinstance(data, list):
+        raise ValueError("The server returned an invalid set catalog.")
+    result = []
+    seen = set()
+    for item in data:
+        if not isinstance(item, dict):
+            raise ValueError("The server returned an invalid set catalog.")
+        set_id, dataset_id = item.get("predefined_set_id"), item.get("dataset_id")
+        name, fraction, active = item.get("dataset_name"), item.get("na_fraction"), item.get("is_active")
+        if (type(set_id) is not int or set_id <= 0 or set_id in seen
+                or type(dataset_id) is not int or dataset_id <= 0
+                or not isinstance(name, str) or not name.strip()
+                or type(fraction) not in (int, float) or fraction not in NA_FRACTIONS
+                or type(active) is not bool):
+            raise ValueError("The server returned an invalid set catalog.")
+        seen.add(set_id)
+        result.append(CatalogSet(set_id, dataset_id, name, float(fraction), active))
+    return tuple(result)
+
+
 class PredefinedDraft:
     """An unsaved form; configuration/input changes invalidate its preview."""
 
@@ -110,6 +141,32 @@ class PredefinedDraft:
 
     def set_annotation_text(self, value: str) -> None:
         self.annotation_text = value
+        self.preview = None
+
+    def load_definition(self, data: Any, datasets: dict[int, CatalogDataset], *, expected_id: int) -> None:
+        """Validate before replacing the draft; loading never samples points."""
+        if not isinstance(data, dict) or type(data.get("predefined_set_id")) is not int or data["predefined_set_id"] != expected_id:
+            raise ValueError("The server returned an invalid set definition.")
+        dataset_id, fraction = data.get("dataset_id"), data.get("na_fraction")
+        if type(dataset_id) is not int:
+            raise ValueError("The server returned an invalid set definition.")
+        if dataset_id not in datasets:
+            raise ValueError("This set's dataset is not in the active dataset catalog. Refresh datasets; an inactive dataset cannot be used to create a new set.")
+        if type(fraction) not in (int, float) or fraction not in NA_FRACTIONS:
+            raise ValueError("The server returned an invalid NA fraction.")
+        for key in ("removed_indices", "annotation_indices"):
+            values = data.get(key)
+            if not isinstance(values, list) or not values or any(type(index) is not int for index in values):
+                raise ValueError("The server returned invalid point lists.")
+        candidate = PredefinedDraft()
+        candidate.select_dataset(datasets[dataset_id])
+        candidate.select_fraction(float(fraction))
+        candidate.set_removed_text(", ".join(map(str, data["removed_indices"])))
+        candidate.set_annotation_text(", ".join(map(str, data["annotation_indices"])))
+        candidate.prepare_preview()
+        self.dataset, self.na_fraction = candidate.dataset, candidate.na_fraction
+        self.removed_text, self.annotation_text = candidate.removed_text, candidate.annotation_text
+        # The author must explicitly review a fresh preview before saving a copy.
         self.preview = None
 
     def generate_from_seed(self, raw_seed: str) -> None:

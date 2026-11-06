@@ -45,10 +45,10 @@ def load_dataset(config: DatasetConfig) -> pd.DataFrame:
 
     df = pd.read_csv(path)
     required = {
-        "Id",
         config.incomplete_column,
         config.target_column,
         *config.reference_columns,
+        *config.categorical_columns,
     }
     missing = required.difference(df.columns)
     if missing:
@@ -57,9 +57,6 @@ def load_dataset(config: DatasetConfig) -> pd.DataFrame:
         )
     if df.empty:
         raise DatasetValidationError("Dataset is empty.")
-    if df["Id"].duplicated().any():
-        raise DatasetValidationError("Id values must be unique.")
-
     numeric_columns = list(config.numeric_model_columns)
     if df[numeric_columns].isna().any().any():
         raise DatasetValidationError(

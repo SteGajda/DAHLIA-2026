@@ -88,7 +88,10 @@ def render_experiment(controller: Any) -> None:
                 ui.html(
                     f'proj <b>{escape(experiment.projection_name)}</b>'
                 )
-                ui.html(f'seed <b>{experiment.seed}</b>')
+                if experiment.source_type == "PREDEFINED":
+                    ui.label(f"Set #{experiment.predefined_set_id}")
+                else:
+                    ui.html(f'seed <b>{experiment.seed}</b>')
 
         with ui.element("main").classes("dahlia-experiment-main"):
             with ui.column().classes("dahlia-experiment-content gap-0"):

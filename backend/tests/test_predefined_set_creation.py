@@ -132,6 +132,71 @@ def test_row_positions_do_not_conflict_across_datasets(client, sqlite_session, a
     assert sqlite_session.scalar(select(func.count()).select_from(PredefinedSetPoint)) == 60
 
 
+def test_exact_active_duplicate_is_rejected_even_if_removed_order_changes(client, sqlite_session, author, dataset):
+    first = client.post(URL, headers=headers(author), json=payload(dataset)).json()
+    data = payload(dataset)
+    data["removed_indices"].reverse()
+    response = client.post(URL, headers=headers(author), json=data)
+    assert response.status_code == 409
+    assert response.json()["detail"] == f"An identical active set already exists: Set #{first['predefined_set_id']}."
+    assert sqlite_session.scalar(select(func.count()).select_from(PredefinedSet)) == 1
+    assert sqlite_session.scalar(select(func.count()).select_from(PredefinedSetPoint)) == 30
+
+
+def test_active_duplicate_is_rejected_across_authors(client, sqlite_session, author, dataset):
+    first = client.post(URL, headers=headers(author), json=payload(dataset)).json()
+    other = AppUser(email="other@example.com", display_name="Other", password_hash="unused",
+                    role_code="DEVELOPER", is_active=True, is_email_verified=True)
+    sqlite_session.add(other)
+    sqlite_session.commit()
+    response = client.post(URL, headers=headers(other), json=payload(dataset))
+    assert response.status_code == 409
+    assert f"Set #{first['predefined_set_id']}" in response.json()["detail"]
+
+
+def test_inactive_duplicate_allows_new_active_set_then_blocks_next_copy(client, sqlite_session, author, dataset):
+    first = client.post(URL, headers=headers(author), json=payload(dataset)).json()
+    old = sqlite_session.get(PredefinedSet, first["predefined_set_id"])
+    old.is_active = False
+    sqlite_session.commit()
+    response = client.post(URL, headers=headers(author), json=payload(dataset))
+    assert response.status_code == 201
+    assert response.json()["is_active"] is True
+    assert response.json()["predefined_set_id"] != old.predefined_set_id
+    sqlite_session.refresh(old)
+    assert old.is_active is False
+    assert client.post(URL, headers=headers(author), json=payload(dataset)).status_code == 409
+
+
+@pytest.mark.parametrize("change", ["removed", "fraction"])
+def test_different_definition_can_be_saved(client, author, dataset, change):
+    assert client.post(URL, headers=headers(author), json=payload(dataset)).status_code == 201
+    data = payload(dataset)
+    if change == "removed":
+        data["removed_indices"] = list(range(29)) + [149]
+    else:
+        data.update(na_fraction=0.3, removed_indices=list(range(45)))
+    assert client.post(URL, headers=headers(author), json=data).status_code == 201
+
+
+def test_sqlserver_creation_locks_dataset_and_compiles_active_comparison(sqlite_session, author, dataset):
+    from sqlalchemy import event
+    from sqlalchemy.dialects import mssql
+
+    statements = []
+    def capture(conn, clause, multiparams, params, options):
+        statements.append(str(clause.compile(dialect=mssql.dialect())))
+    engine = sqlite_session.get_bind()
+    event.listen(engine, "before_execute", capture)
+    try:
+        create_predefined_set(sqlite_session, PredefinedSetCreate(**payload(dataset)), author)
+    finally:
+        event.remove(engine, "before_execute", capture)
+    assert any("WITH (UPDLOCK, HOLDLOCK)" in sql and "dahlia.dataset" in sql for sql in statements)
+    assert any("predefined_set.is_active = 1" in sql for sql in statements)
+    assert not any("is_active IS 1" in sql for sql in statements)
+
+
 @pytest.mark.parametrize("role", ["USER", "USER_PLUS"])
 def test_other_roles_cannot_create(client, sqlite_session, author, dataset, role):
     author.role_code = role
@@ -253,3 +318,62 @@ def test_database_failure_rolls_back_set_and_all_points(
     assert "private" not in caught.value.detail
     assert_no_sets(sqlite_session)
     assert sqlite_session.get(Dataset, dataset.dataset_id) is not None
+
+
+@pytest.mark.parametrize("role", ["RESEARCHER", "DEVELOPER"])
+def test_deactivate_other_authors_set_preserves_definition_and_is_idempotent(client, sqlite_session, author, dataset, role):
+    original = client.post(URL, headers=headers(author), json=payload(dataset)).json()
+    manager = AppUser(email="manager@example.com", display_name="Manager", password_hash="unused",
+                      role_code=role, is_active=True, is_email_verified=True)
+    sqlite_session.add(manager)
+    sqlite_session.commit()
+    url = f"{URL}/{original['predefined_set_id']}/deactivate"
+    for _ in range(2):
+        response = client.post(url, headers=headers(manager))
+        assert response.status_code == 200
+        assert response.json() == dict(predefined_set_id=original["predefined_set_id"], is_active=False)
+    detail = client.get(f"{URL}/{original['predefined_set_id']}", headers=headers(manager)).json()
+    assert detail == {**original, "is_active": False}
+    assert sqlite_session.scalar(select(func.count()).select_from(PredefinedSetPoint)) == 30
+    assert client.get(URL, headers=headers(manager)).json()[0]["is_active"] is False
+    # Deactivation permits a new identical definition, never reactivates the old ID.
+    created = client.post(URL, headers=headers(manager), json=payload(dataset))
+    assert created.status_code == 201
+    assert created.json()["predefined_set_id"] != original["predefined_set_id"]
+
+
+@pytest.mark.parametrize("state,status", [("USER", 403), ("USER_PLUS", 403), ("inactive", 401), ("unverified", 403), ("anonymous", 401)])
+def test_deactivation_requires_verified_active_manager(client, sqlite_session, author, dataset, state, status):
+    saved = client.post(URL, headers=headers(author), json=payload(dataset)).json()
+    auth = headers(author)
+    if state in ("USER", "USER_PLUS"):
+        author.role_code = state
+    elif state == "inactive":
+        author.is_active = False
+    elif state == "unverified":
+        author.is_email_verified = False
+    else:
+        auth = {}
+    sqlite_session.commit()
+    response = client.post(f"{URL}/{saved['predefined_set_id']}/deactivate", headers=auth)
+    assert response.status_code == status
+    sqlite_session.expire_all()
+    assert sqlite_session.get(PredefinedSet, saved["predefined_set_id"]).is_active is True
+
+
+@pytest.mark.parametrize("set_id,status", [(999, 404), (0, 422), (-1, 422), ("abc", 422)])
+def test_deactivate_unknown_or_invalid_id(client, author, set_id, status):
+    assert client.post(f"{URL}/{set_id}/deactivate", headers=headers(author)).status_code == status
+
+
+def test_deactivation_failure_rolls_back(sqlite_session, author, dataset, monkeypatch):
+    from app.services.predefined_set_authoring import deactivate_predefined_set
+    saved = create_predefined_set(sqlite_session, PredefinedSetCreate(**payload(dataset)), author)
+    def fail():
+        raise SQLAlchemyError("private connection details")
+    monkeypatch.setattr(sqlite_session, "commit", fail)
+    with pytest.raises(HTTPException) as caught:
+        deactivate_predefined_set(sqlite_session, saved.predefined_set_id)
+    assert caught.value.status_code == 500
+    assert "private" not in caught.value.detail
+    assert sqlite_session.get(PredefinedSet, saved.predefined_set_id).is_active is True

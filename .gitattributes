@@ -1,0 +1,3 @@
+# Keep imported dataset bytes identical on Windows and Linux (SHA-256 identity).
+frontend/data/wola.csv -text whitespace=cr-at-eol
+frontend/data/stamp_type.csv -text whitespace=cr-at-eol
