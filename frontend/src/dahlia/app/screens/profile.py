@@ -10,6 +10,14 @@ from dahlia.app.components.layout import sidebar_page
 from dahlia.app.components.database_access import render_database_access
 
 
+def is_wut_email(email: str) -> bool:
+    """Return True if the email domain is pw.edu.pl or an official WUT subdomain."""
+    if not email or "@" not in email:
+        return False
+    domain = email.strip().lower().split("@")[-1]
+    return domain == "pw.edu.pl" or domain.endswith(".pw.edu.pl")
+
+
 # Public render functions
 
 def render_profile(controller: Any) -> None:
@@ -69,6 +77,43 @@ def render_login(controller: Any, error: str | None = None) -> None:
                             .props("outlined dense type=password")
                             .classes("dahlia-field")
                         )
+                        with ui.row().classes("w-full justify-end mt-1"):
+                            forgot_btn = ui.button(
+                                "Forgot password?",
+                                on_click=lambda: forgot_dialog.open(),
+                            ).props("flat dense no-caps").classes("text-xs dahlia-link")
+
+                forgot_dialog = ui.dialog()
+                with forgot_dialog, ui.card().classes("dahlia-modal-card gap-3").style("min-width: 380px"):
+                    ui.label("Reset password").classes("dahlia-modal-title")
+                    ui.label(
+                        "Enter your account email address and we will send you a password reset link."
+                    ).classes("dahlia-modal-copy")
+                    forgot_email = (
+                        ui.input(placeholder="you@example.com")
+                        .props("outlined dense type=email")
+                        .classes("w-full dahlia-field")
+                    )
+                    forgot_status = ui.label("").classes("text-xs text-red-700 mt-1")
+                    forgot_status.set_visibility(False)
+
+                    async def submit_forgot() -> None:
+                        forgot_status.set_visibility(False)
+                        send_reset_btn.disable()
+                        try:
+                            ok, msg = await controller.do_forgot_password(str(forgot_email.value or ""))
+                            if ok:
+                                ui.notify(msg, type="positive", timeout=8000)
+                                forgot_dialog.close()
+                            else:
+                                forgot_status.text = msg
+                                forgot_status.set_visibility(True)
+                        finally:
+                            send_reset_btn.enable()
+
+                    with ui.row().classes("w-full justify-end gap-2 mt-2"):
+                        ui.button("Cancel", on_click=forgot_dialog.close).classes("dahlia-secondary-btn")
+                        send_reset_btn = ui.button("Send reset link", on_click=submit_forgot).classes("dahlia-primary-btn")
 
                 error_label = ui.label("").classes("text-xs text-red-700 mt-2")
                 error_label.set_visibility(False)
@@ -128,12 +173,13 @@ def render_register(controller: Any, error: str | None = None) -> None:
                             .classes("dahlia-field")
                         )
 
-                    affiliation_check = ui.checkbox(
-                        "I am affiliated with Warsaw University of Technology"
-                    ).classes("dahlia-checkbox")
+                    affiliation_badge = ui.label(
+                        "✓ Warsaw University of Technology affiliation detected"
+                    ).classes("text-xs text-positive font-medium mb-1")
+                    affiliation_badge.set_visibility(False)
 
                     with ui.column().classes("w-full gap-0") as index_container:
-                        ui.label("Student index number").classes(
+                        ui.label("Student index number (optional)").classes(
                             "dahlia-field-label"
                         )
                         index_input = (
@@ -143,12 +189,14 @@ def render_register(controller: Any, error: str | None = None) -> None:
                         )
                     index_container.set_visibility(False)
 
-                    def toggle_affiliation(event: Any) -> None:
-                        index_container.set_visibility(event.value)
-                        if not event.value:
+                    def on_email_change(event: Any) -> None:
+                        is_pw = is_wut_email(str(event.value or ""))
+                        affiliation_badge.set_visibility(is_pw)
+                        index_container.set_visibility(is_pw)
+                        if not is_pw:
                             index_input.value = ""
 
-                    affiliation_check.on_value_change(toggle_affiliation)
+                    email_input.on_value_change(on_email_change)
 
                     consent_check = ui.checkbox(
                         "I agree that my experiment results may be stored and"
@@ -164,7 +212,6 @@ def render_register(controller: Any, error: str | None = None) -> None:
                         email_input,
                         username_input,
                         password_input,
-                        affiliation_check,
                         index_input,
                         consent_check,
                         error_label,
@@ -302,18 +349,18 @@ async def _do_register(
     email_input: Any,
     username_input: Any,
     password_input: Any,
-    affiliation_check: Any,
     index_input: Any,
     consent_check: Any,
     error_label: Any,
 ) -> None:
     """Validate and submit the registration form to the backend."""
     error_label.set_visibility(False)
+    email_val = str(email_input.value or "")
     msg = await controller.do_register(
-        email=str(email_input.value or ""),
+        email=email_val,
         username=str(username_input.value or ""),
         password=str(password_input.value or ""),
-        affiliated=bool(affiliation_check.value),
+        affiliated=is_wut_email(email_val),
         index_no=str(index_input.value or ""),
         agreed=bool(consent_check.value),
     )

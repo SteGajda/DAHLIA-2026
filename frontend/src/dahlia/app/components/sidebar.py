@@ -4,10 +4,24 @@ from __future__ import annotations
 
 from typing import Any
 
-from nicegui import ui
+from nicegui import app, ui
 
 from dahlia.services.config import APP_VERSION
 from dahlia.services.predefined_sets import can_manage_predefined_sets
+
+
+def _open_exit_dialog() -> None:
+    """Show a confirmation dialog to safely shut down the desktop application."""
+    dialog = ui.dialog()
+    with dialog, ui.card().classes("dahlia-modal-card gap-3"):
+        ui.label("Exit DAHLIA?").classes("dahlia-modal-title")
+        ui.label("Are you sure you want to close the application?").classes(
+            "dahlia-modal-copy"
+        )
+        with ui.row().classes("w-full justify-end gap-2 mt-2"):
+            ui.button("Cancel", on_click=dialog.close).classes("dahlia-secondary-btn")
+            ui.button("Exit", on_click=lambda: app.shutdown()).classes("dahlia-danger-btn")
+    dialog.open()
 
 
 def _format_status_badge(is_online: bool) -> str:
@@ -70,13 +84,19 @@ def render_sidebar(controller: Any, active: str) -> None:
                     on_click=controller.show_admin,
                 )
 
-        # Profile
+        # Profile & Exit
         with ui.column().classes("dahlia-sidebar-bottom gap-0"):
             _nav_item(
                 icon="person",
                 label="Profile",
                 is_active=(active == "profile"),
                 on_click=controller.show_profile,
+            )
+            _nav_item(
+                icon="power_settings_new",
+                label="Exit Application",
+                is_active=False,
+                on_click=_open_exit_dialog,
             )
 
 

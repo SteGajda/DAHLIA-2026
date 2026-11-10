@@ -16,13 +16,14 @@ _SYNC_CSS: dict[str, str] = {
     "Sync failed": "dahlia-sync-failed",
 }
 
+_COL_CHECKBOX_WIDTH = "42px"
 _COLUMNS: list[tuple[str, str]] = [
-    ("DATE", "150px"),
-    ("DATASET", "100px"),
-    ("SEED / SET ID", "130px"),
-    ("NA", "60px"),
-    ("PROJECTION", "110px"),
-    ("SYNC STATUS", "125px"),
+    ("DATE", "145px"),
+    ("DATASET", "95px"),
+    ("SEED / SET ID", "125px"),
+    ("NA", "55px"),
+    ("PROJECTION", "105px"),
+    ("SYNC STATUS", "120px"),
     ("ACTIONS", "110px"),
 ]
 
@@ -58,6 +59,29 @@ def render_my_results(controller: Any) -> None:
                          "Only experiments saved with complete predictions can be uploaded.").classes(
                              "text-sm dahlia-muted mb-4")
 
+            # Selection state
+            selected_uids: set[str] = set()
+            row_checkboxes: dict[str, Any] = {}
+            header_cb_container: list[Any] = []
+            selection_label_container: list[Any] = []
+
+            def _update_selection_ui() -> None:
+                count = len(selected_uids)
+                total = len(experiments)
+                if selection_label_container:
+                    lbl = selection_label_container[0]
+                    if count > 0:
+                        lbl.text = f"{count} of {total} selected"
+                        lbl.set_visibility(True)
+                    else:
+                        lbl.text = ""
+                        lbl.set_visibility(False)
+                if header_cb_container and total > 0:
+                    header_cb_container[0].value = (count == total)
+
+            def _get_selected_experiments() -> list[dict]:
+                return [exp for exp in experiments if exp["experiment_uid"] in selected_uids]
+
             # Export controls
             with ui.row().classes("items-center gap-2 mb-5 flex-wrap"):
                 format_select = (
@@ -67,18 +91,26 @@ def render_my_results(controller: Any) -> None:
                     .classes("dahlia-field")
                 )
 
-                def _export_metrics_all() -> None:
+                def _export_metrics_selected() -> None:
+                    targets = _get_selected_experiments()
+                    if not targets:
+                        ui.notify("Please select at least one experiment to export.", type="warning")
+                        return
                     if format_select.value == "CSV":
-                        controller.export_local_csv_metrics()
+                        controller.export_local_csv_metrics(targets)
                     else:
                         ui.notify(
                             f"{format_select.value} export coming soon.",
                             type="info",
                         )
 
-                def _export_answers_all() -> None:
+                def _export_answers_selected() -> None:
+                    targets = _get_selected_experiments()
+                    if not targets:
+                        ui.notify("Please select at least one experiment to export.", type="warning")
+                        return
                     if format_select.value == "CSV":
-                        controller.export_local_csv_answers()
+                        controller.export_local_csv_answers(targets)
                     else:
                         ui.notify(
                             f"{format_select.value} export coming soon.",
@@ -87,16 +119,20 @@ def render_my_results(controller: Any) -> None:
 
                 ui.button(
                     "Export metrics",
-                    on_click=_export_metrics_all,
+                    on_click=_export_metrics_selected,
                 ).classes("dahlia-export-btn active").tooltip(
-                    "Export MAE/RMSE summary for all local experiments"
+                    "Export MAE/RMSE summary for selected experiments"
                 )
                 ui.button(
                     "Export answers",
-                    on_click=_export_answers_all,
+                    on_click=_export_answers_selected,
                 ).classes("dahlia-export-btn active").tooltip(
-                    "Export per-point annotator answers for all local experiments"
+                    "Export per-point annotator answers for selected experiments"
                 )
+
+                sel_label = ui.label("").classes("text-xs dahlia-mono dahlia-muted ml-1")
+                sel_label.set_visibility(False)
+                selection_label_container.append(sel_label)
 
                 ui.space()
 
@@ -120,12 +156,24 @@ def render_my_results(controller: Any) -> None:
                         )
                         return
 
-                    candidates = controller.get_upload_candidates()
-                    if not candidates:
-                        ui.notify("No complete, unsynced experiments are assigned to this account.", type="info")
+                    targets = _get_selected_experiments()
+                    if not targets:
+                        ui.notify("Please select at least one experiment to upload.", type="warning")
+                        return
+
+                    eligible = [
+                        exp for exp in controller.get_upload_candidates()
+                        if exp["experiment_uid"] in selected_uids
+                    ]
+                    if not eligible:
+                        ui.notify(
+                            "None of the selected experiments can be uploaded "
+                            "(they might be already synced, incomplete, or assigned to another account).",
+                            type="info",
+                        )
                         return
                     owner = controller.current_user["user_id"]
-                    confirmed_uids = [exp["experiment_uid"] for exp in candidates]
+                    confirmed_uids = [exp["experiment_uid"] for exp in eligible]
                     dialog = ui.dialog()
 
                     async def _upload_confirmed():
@@ -147,7 +195,7 @@ def render_my_results(controller: Any) -> None:
 
                     with dialog, ui.card().classes("dahlia-modal-card gap-3"):
                         ui.label("Upload experiments?").classes("dahlia-modal-title")
-                        ui.label(f"Upload {len(confirmed_uids)} completed experiment(s) as "
+                        ui.label(f"Upload {len(confirmed_uids)} selected experiment(s) as "
                                  f"{controller.current_user.get('email', '')}?")
                         with ui.row().classes("w-full justify-end gap-2"):
                             ui.button("Cancel", on_click=dialog.close).classes("dahlia-secondary-btn")
@@ -163,7 +211,14 @@ def render_my_results(controller: Any) -> None:
             if not experiments:
                 _render_empty_state()
             else:
-                _render_table(controller, experiments)
+                _render_table(
+                    controller,
+                    experiments,
+                    selected_uids=selected_uids,
+                    row_checkboxes=row_checkboxes,
+                    header_cb_container=header_cb_container,
+                    on_selection_change=_update_selection_ui,
+                )
 
 
 def _open_assignment_dialog(controller: Any) -> None:
@@ -203,12 +258,30 @@ def _render_empty_state() -> None:
         ).classes("text-xs dahlia-muted mt-1")
 
 
-def _render_table(controller: Any, experiments: list[dict]) -> None:
-    """Render local experiments as a styled, fixed-column table with per-row actions.
+def _render_table(
+    controller: Any,
+    experiments: list[dict],
+    *,
+    selected_uids: set[str],
+    row_checkboxes: dict[str, Any],
+    header_cb_container: list[Any],
+    on_selection_change: Any,
+) -> None:
+    """Render local experiments as a styled, fixed-column table with per-row actions and checkboxes.
 
     Uses plain NiceGUI rows rather than ``ui.table`` to allow direct Python
     callbacks on the action buttons without relying on Vue ``$emit`` propagation.
     """
+    def _toggle_all(val: bool) -> None:
+        if val:
+            for exp in experiments:
+                selected_uids.add(exp["experiment_uid"])
+        else:
+            selected_uids.clear()
+        for cb in row_checkboxes.values():
+            cb.value = val
+        on_selection_change()
+
     with ui.column().classes("dahlia-my-results-table gap-0 w-full"):
         # Header row
         with ui.row().classes("gap-0 items-center").style(
@@ -216,6 +289,15 @@ def _render_table(controller: Any, experiments: list[dict]) -> None:
             " border-bottom: 1px solid var(--dahlia-border);"
             " background: rgba(247,247,249,.8);"
         ):
+            with ui.element("div").style(
+                f"width: {_COL_CHECKBOX_WIDTH}; min-width: {_COL_CHECKBOX_WIDTH}; flex-shrink: 0"
+            ):
+                h_cb = ui.checkbox(
+                    value=(len(selected_uids) == len(experiments) and len(experiments) > 0),
+                    on_change=lambda e: _toggle_all(bool(e.value)),
+                ).props("dense size=sm").tooltip("Select / deselect all")
+                header_cb_container.append(h_cb)
+
             for label, width in _COLUMNS:
                 ui.label(label).classes("dahlia-mono text-xs dahlia-muted").style(
                     f"width: {width}; min-width: {width}; flex-shrink: 0"
@@ -229,10 +311,29 @@ def _render_table(controller: Any, experiments: list[dict]) -> None:
                 else ""
             )
             css = _SYNC_CSS.get(exp["sync_status"], "dahlia-sync-local")
+            uid = exp["experiment_uid"]
 
             with ui.row().classes("gap-0 items-center").style(
                 f"padding: 10px 16px; {border}"
             ):
+                with ui.element("div").style(
+                    f"width: {_COL_CHECKBOX_WIDTH}; min-width: {_COL_CHECKBOX_WIDTH}; flex-shrink: 0"
+                ):
+                    def _make_row_toggle(e_uid: str):
+                        def _handler(e: Any) -> None:
+                            if e.value:
+                                selected_uids.add(e_uid)
+                            else:
+                                selected_uids.discard(e_uid)
+                            on_selection_change()
+                        return _handler
+
+                    r_cb = ui.checkbox(
+                        value=(uid in selected_uids),
+                        on_change=_make_row_toggle(uid),
+                    ).props("dense size=sm")
+                    row_checkboxes[uid] = r_cb
+
                 ui.label(exp["date"]).classes("text-sm").style(
                     f"width: {_COLUMNS[0][1]}; min-width: {_COLUMNS[0][1]}; flex-shrink: 0"
                 )

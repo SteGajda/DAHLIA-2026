@@ -4,7 +4,7 @@ K-nearest neighbors imputation methods for DAHLIA experiments.
 
 import numpy as np
 import pandas as pd
-from sklearn.cluster import KMeans
+from sklearn.cluster._kmeans import KMeans
 from sklearn.impute import KNNImputer as SklearnKNNImputer
 from sklearn.utils.validation import check_is_fitted
 

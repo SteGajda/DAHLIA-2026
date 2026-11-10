@@ -199,7 +199,7 @@ def build_experiment_figure(
             title=None,
         ),
         showlegend=False,
-        uirevision=None,
+        uirevision=f"step_{experiment.current_step}",
     )
     figure.update_layout(
         modebar=dict(remove=["select2d", "lasso2d"]),
@@ -213,3 +213,126 @@ PLOTLY_CONFIG = {
     "doubleClick": "reset+autosize",
     "responsive": True,
 }
+
+
+def build_predefined_preview_figure(
+    dataset_name: str,
+    removed_indices: tuple[int, ...] | list[int],
+    annotation_indices: tuple[int, ...] | list[int],
+    projection_name: str = "PCA",
+) -> go.Figure | None:
+    """Build a 2D overview figure for a predefined set definition.
+
+    Shows:
+    - Observed points (known data) in muted neutral gray.
+    - Other removed points (NA) in light coral with 'x' marks.
+    - 15 evaluation points in vivid DAHLIA purple with step numbers 1..15.
+    """
+    from dahlia.services.config import DATASETS
+    from dahlia.services.data import load_dataset
+    from dahlia.services.projection import compute_projection
+
+    cfg = DATASETS.get(dataset_name)
+    if cfg is None:
+        return None
+
+    try:
+        df = load_dataset(cfg)
+        coords = compute_projection(df, cfg, projection_name, seed=0)
+    except Exception:
+        return None
+
+    removed_set = set(removed_indices)
+    annotation_set = set(annotation_indices)
+    observed_idx = [i for i in df.index if i not in removed_set]
+    other_removed_idx = [i for i in removed_indices if i not in annotation_set]
+
+    fig = go.Figure()
+
+    # 1. Observed points
+    if observed_idx:
+        obs_coords = coords.loc[observed_idx]
+        fig.add_trace(
+            go.Scattergl(
+                x=obs_coords["x"],
+                y=obs_coords["y"],
+                mode="markers",
+                marker=dict(size=7, color="#b0b0ba", opacity=0.6, line=dict(width=0.5, color="white")),
+                name="Observed data",
+                hoverinfo="text",
+                hovertext=[f"Observed (row {i})" for i in observed_idx],
+            )
+        )
+
+    # 2. Other removed NA points
+    if other_removed_idx:
+        rem_coords = coords.loc[other_removed_idx]
+        fig.add_trace(
+            go.Scattergl(
+                x=rem_coords["x"],
+                y=rem_coords["y"],
+                mode="markers",
+                marker=dict(size=8, color="#e06c75", symbol="x", line=dict(width=1.2, color="#e06c75")),
+                name="Other NA points",
+                hoverinfo="text",
+                hovertext=[f"Removed NA (row {i})" for i in other_removed_idx],
+            )
+        )
+
+    # 3. 15 Human Evaluation points with step numbers
+    if annotation_indices:
+        ann_coords = coords.loc[list(annotation_indices)]
+        step_numbers = [str(step) for step in range(1, len(annotation_indices) + 1)]
+        fig.add_trace(
+            go.Scattergl(
+                x=ann_coords["x"],
+                y=ann_coords["y"],
+                mode="markers+text",
+                marker=dict(
+                    size=14,
+                    color="#6B5DD3",
+                    line=dict(width=2, color="#ffffff"),
+                ),
+                text=step_numbers,
+                textposition="top center",
+                textfont=dict(size=11, family="monospace", color="#4335A8"),
+                name="Evaluation points (1-15)",
+                hoverinfo="text",
+                hovertext=[
+                    f"Step {step}: Row {idx}"
+                    for step, idx in enumerate(annotation_indices, start=1)
+                ],
+            )
+        )
+
+    fig.update_layout(
+        margin=dict(l=40, r=40, t=30, b=40),
+        paper_bgcolor="white",
+        plot_bgcolor="#fafafc",
+        hovermode="closest",
+        dragmode="pan",
+        xaxis=dict(
+            range=_axis_range(coords["x"].to_numpy()),
+            gridcolor="#ededf2",
+            gridwidth=0.7,
+            zeroline=False,
+            tickfont=dict(size=9, family="monospace", color="#9999a1"),
+        ),
+        yaxis=dict(
+            range=_axis_range(coords["y"].to_numpy()),
+            gridcolor="#ededf2",
+            gridwidth=0.7,
+            zeroline=False,
+            tickfont=dict(size=9, family="monospace", color="#9999a1"),
+        ),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1,
+            font=dict(size=10, family="sans-serif"),
+        ),
+        height=380,
+    )
+    return fig

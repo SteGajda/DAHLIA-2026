@@ -13,6 +13,14 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
 
+def is_wut_email(email: str) -> bool:
+    """Return True if the email domain is pw.edu.pl or an official WUT subdomain."""
+    if not email or "@" not in email:
+        return False
+    domain = email.strip().lower().split("@")[-1]
+    return domain == "pw.edu.pl" or domain.endswith(".pw.edu.pl")
+
+
 # Registration
 class RegisterRequest(BaseModel):
     """Request body for ``POST /api/v1/auth/register``."""
@@ -40,19 +48,25 @@ class RegisterRequest(BaseModel):
         return stripped
 
     @model_validator(mode="after")
-    def student_id_required_when_affiliated(self) -> "RegisterRequest":
-        """Enforce that ``student_id_number`` is present and valid (6 digits)
-        when the user claims affiliation with Warsaw University of Technology.
+    def validate_affiliation_and_student_id(self) -> "RegisterRequest":
+        """Auto-detect WUT affiliation based on email domain (@pw.edu.pl or *.pw.edu.pl).
+        Validate that student_id_number is exactly 6 digits if supplied.
         """
-        if self.is_pw_affiliated:
-            if not self.student_id_number:
-                raise ValueError(
-                    "student_id_number is required when is_pw_affiliated is True."
-                )
-            if not re.match(r"^\d{6}$", self.student_id_number):
-                raise ValueError(
-                    "student_id_number must be exactly 6 digits (e.g. '123456')."
-                )
+        if is_wut_email(self.email):
+            self.is_pw_affiliated = True
+
+        if self.student_id_number:
+            idx = self.student_id_number.strip()
+            if idx:
+                if not re.match(r"^\d{6}$", idx):
+                    raise ValueError(
+                        "student_id_number must be exactly 6 digits (e.g. '123456')."
+                    )
+                self.student_id_number = idx
+            else:
+                self.student_id_number = None
+        else:
+            self.student_id_number = None
         return self
 
 

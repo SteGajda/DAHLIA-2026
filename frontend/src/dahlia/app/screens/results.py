@@ -90,31 +90,7 @@ def render_results(controller: Any) -> None:
                     """,
                 )
 
-                # Action buttons
-                def _export_current() -> None:
-                    """Export metrics + answers CSVs for the just-finished experiment."""
-                    if not controller.local_experiments:
-                        return
-                    current = [controller.local_experiments[-1]]
-                    controller.export_local_csv_metrics(current)
-                    controller.export_local_csv_answers(current)
-
-                ui.button(
-                    "Export this experiment",
-                    on_click=_export_current,
-                ).props("outline no-caps").classes("dahlia-secondary-btn w-full mb-2")
-
-                if controller.current_user is not None:
-                    ui.button(
-                        "Upload to database",
-                        on_click=lambda: ui.notify(
-                            "Database upload is not yet implemented.",
-                            type="info",
-                        ),
-                    ).props("outline no-caps").classes(
-                        "dahlia-secondary-btn w-full mb-2"
-                    )
-
+                # Action button
                 ui.button(
                     "Back to main menu",
                     on_click=lambda: controller.show_setup(reset_defaults=False),

@@ -97,18 +97,18 @@ class TestRegister:
         resp = client.post(f"{_BASE}/register", json=bad)
         assert resp.status_code == 422
 
-    def test_affiliated_without_student_id_returns_422(self, client):
-        bad = {**_VALID_REGISTER, "is_pw_affiliated": True, "student_id_number": None}
-        resp = client.post(f"{_BASE}/register", json=bad)
-        assert resp.status_code == 422
+    def test_wut_email_auto_detects_affiliation(self, client):
+        data = {**_VALID_REGISTER, "email": "jan.kowalski.student@pw.edu.pl"}
+        resp = client.post(f"{_BASE}/register", json=data)
+        assert resp.status_code == 201
 
     def test_affiliated_with_invalid_student_id_returns_422(self, client):
-        bad = {**_VALID_REGISTER, "is_pw_affiliated": True, "student_id_number": "ABC123"}
+        bad = {**_VALID_REGISTER, "email": "student@pw.edu.pl", "student_id_number": "ABC123"}
         resp = client.post(f"{_BASE}/register", json=bad)
         assert resp.status_code == 422
 
     def test_affiliated_with_valid_student_id_succeeds(self, client):
-        data = {**_VALID_REGISTER, "is_pw_affiliated": True, "student_id_number": "123456"}
+        data = {**_VALID_REGISTER, "email": "student@pw.edu.pl", "student_id_number": "123456"}
         resp = client.post(f"{_BASE}/register", json=data)
         assert resp.status_code == 201
 

@@ -47,8 +47,12 @@ from app.core.security import (
     hash_refresh_token,
     verify_password,
 )
+from app.services.reset_password_page import reset_password_page
 from app.services.verification_email import (
-    EmailCooldownError, EmailDeliveryError, request_verification_email,
+    EmailCooldownError,
+    EmailDeliveryError,
+    request_verification_email,
+    send_password_reset_email,
 )
 from app.services.verification_page import verification_page
 from app.db.session import get_db
@@ -472,10 +476,20 @@ def forgot_password(
             user.email,
             reset_token,
         )
+        try:
+            send_password_reset_email(user.email, reset_token)
+        except Exception as exc:
+            logger.warning("Could not send password reset email to %s: %s", user.email, exc)
 
     return {
         "message": "If an account with that e-mail exists, a password reset link has been sent."
     }
+
+
+@router.get("/reset-password", include_in_schema=False)
+def serve_reset_password_page():
+    """Serve the static password reset HTML page."""
+    return reset_password_page()
 
 
 @router.post(

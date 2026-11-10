@@ -5,7 +5,8 @@ from typing import Any
 from nicegui import ui
 
 from dahlia.app.components.layout import sidebar_page
-from dahlia.services.config import MAX_SEED, NA_FRACTIONS
+from dahlia.app.components.chart import build_predefined_preview_figure
+from dahlia.services.config import MAX_SEED, NA_FRACTIONS, PROJECTIONS
 from dahlia.services.predefined_sets import (
     PredefinedDraft, can_manage_predefined_sets, parse_dataset_catalog, parse_set_catalog,
 )
@@ -190,13 +191,45 @@ def render_predefined_sets(controller: Any) -> None:
             ui.label("Preview").classes("text-lg font-semibold")
             ui.label(f"{result.dataset.name} | NA fraction {result.na_fraction} | "
                      f"{len(result.removed_indices)} removed points").classes("text-sm dahlia-muted")
-            ui.label("Evaluation order").classes("text-sm font-medium")
-            with ui.row().classes("w-full gap-2"):
+
+            # 2D Projection visualization
+            with ui.row().classes("w-full items-center justify-between mt-3"):
+                ui.label("2D Projection Overview").classes("text-sm font-medium")
+                proj_select = ui.select(
+                    list(PROJECTIONS),
+                    value="PCA",
+                    label="Projection",
+                ).props("outlined dense").classes("w-36")
+
+            chart_box = ui.column().classes("w-full")
+
+            def update_chart(proj_name: str) -> None:
+                chart_box.clear()
+                fig = build_predefined_preview_figure(
+                    dataset_name=result.dataset.name,
+                    removed_indices=result.removed_indices,
+                    annotation_indices=result.annotation_indices,
+                    projection_name=proj_name,
+                )
+                if fig is not None:
+                    with chart_box:
+                        ui.plotly(fig).classes("w-full")
+                else:
+                    with chart_box:
+                        ui.label("Projection figure could not be loaded for this dataset.").classes(
+                            "text-xs dahlia-muted py-4"
+                        )
+
+            update_chart("PCA")
+            proj_select.on_value_change(lambda e: update_chart(e.value))
+
+            ui.label("Evaluation order").classes("text-sm font-medium mt-3")
+            with ui.row().classes("w-full gap-2 flex-wrap"):
                 for order, index in enumerate(result.annotation_indices, start=1):
                     ui.label(f"{order}.  row {index}").classes(
-                        "dahlia-mono text-sm rounded border px-3 py-2"
+                        "dahlia-mono text-sm rounded border px-3 py-2 bg-slate-50"
                     )
-            ui.label("Review the evaluation order before saving.").classes("text-sm dahlia-muted")
+            ui.label("Review the evaluation order and points distribution before saving.").classes("text-sm dahlia-muted")
         preview.set_visibility(True)
         save_area.set_visibility(True)
         if result == saved_preview:
@@ -355,8 +388,9 @@ def render_predefined_sets(controller: Any) -> None:
             hint.set_text(f"Enter exactly {draft.missing_count} removed indices. "
                           f"Allowed row_index: 0-{draft.dataset.row_count - 1} ({draft.dataset.row_count} rows).")
             source.set_text(f"Loaded from Set #{set_id}. Saving will create a new set; Set #{set_id} will stay unchanged.")
-            set_status.set_text(f"Set #{set_id} loaded. Review or edit the lists, then prepare a preview.")
+            set_status.set_text(f"Set #{set_id} loaded.")
             browser.close()
+            prepare_preview()
         finally:
             loading = False
             if still_current():

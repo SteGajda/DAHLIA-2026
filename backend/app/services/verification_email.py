@@ -59,6 +59,35 @@ def send_verification_email(recipient: str, token: str) -> None:
         raise EmailDeliveryError("SMTP could not deliver the verification message.") from exc
 
 
+def send_password_reset_email(recipient: str, token: str) -> None:
+    settings = get_settings()
+    if settings.EMAIL_DELIVERY_MODE != "smtp":
+        return
+    link = (settings.PUBLIC_API_URL.rstrip("/")
+            + "/api/v1/auth/reset-password#token=" + quote(token, safe=""))
+    message = EmailMessage()
+    message["Subject"] = "Reset your DAHLIA password"
+    message["From"] = formataddr(("DAHLIA", str(settings.SMTP_FROM_EMAIL)))
+    message["To"] = recipient
+    message.set_content(
+        "A password reset was requested for your DAHLIA account.\n\n"
+        f"Open this link to choose a new password:\n{link}\n\n"
+        "The link expires in 1 hour. If you did not request this, you can safely ignore this message.\n"
+    )
+    try:
+        with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT,
+                          timeout=settings.SMTP_TIMEOUT_SECONDS) as smtp:
+            smtp.ehlo()
+            smtp.starttls(context=ssl.create_default_context())
+            smtp.ehlo()
+            smtp.login(settings.SMTP_USERNAME, settings.SMTP_PASSWORD.get_secret_value())
+            refused = smtp.send_message(message)
+            if refused:
+                raise EmailDeliveryError("SMTP refused the recipient.")
+    except (smtplib.SMTPException, OSError) as exc:
+        raise EmailDeliveryError("SMTP could not deliver the password reset message.") from exc
+
+
 def request_verification_email(db: Session, user: AppUser) -> None:
     if user.is_email_verified:
         return

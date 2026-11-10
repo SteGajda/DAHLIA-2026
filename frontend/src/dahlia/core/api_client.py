@@ -273,6 +273,16 @@ class ApiClient:
         }
         return await self._request("POST", "/api/v1/auth/register", json=payload)
 
+    async def forgot_password(self, email: str) -> ApiResult:
+        """Request a password reset link."""
+        payload = {"email": email.strip()}
+        return await self._request("POST", "/api/v1/auth/forgot-password", json=payload)
+
+    async def reset_password(self, token: str, new_password: str) -> ApiResult:
+        """Reset password using a token."""
+        payload = {"token": token.strip(), "new_password": new_password}
+        return await self._request("POST", "/api/v1/auth/reset-password", json=payload)
+
     async def refresh(self, refresh_token: str | None = None) -> ApiResult:
         """Exchange stored refresh token for a new access token."""
         token = refresh_token or self.get_refresh_token()

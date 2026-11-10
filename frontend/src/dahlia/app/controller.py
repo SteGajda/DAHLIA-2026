@@ -784,6 +784,26 @@ class AppController:
             return True, "Email verified. You can now upload your experiments."
         return False, "Email is not verified yet. Open the link in your email and confirm it."
 
+    async def do_forgot_password(self, email: str) -> tuple[bool, str]:
+        """Request a password reset link from the API.
+
+        Returns (success: bool, message: str).
+        """
+        email = email.strip()
+        if not email or "@" not in email:
+            return False, "Please enter a valid email address."
+        res = await self.api_client.forgot_password(email)
+        if res.is_offline:
+            self.is_online = False
+            return False, "Cannot connect to server. Password reset requires an internet connection."
+        self.is_online = True
+        if not res.success:
+            return False, res.error or "Failed to request password reset."
+        msg = (res.data or {}).get(
+            "message", "If an account with that email exists, a password reset link has been sent."
+        )
+        return True, msg
+
     def get_unassigned_experiment_uids(self) -> list[str]:
         return [record["experiment_uid"] for record in self.storage.get_unsynced_experiments()
                 if record.get("user_id") is None]
@@ -893,14 +913,10 @@ class AppController:
             return "Password is required."
         if len(password) < 8:
             return "Password must be at least 8 characters long."
-        if affiliated:
-            idx = index_no.strip()
-            if not idx:
-                return "Student index number is required."
+        idx = index_no.strip() if index_no else ""
+        if idx:
             if not (idx.isdigit() and len(idx) == 6):
                 return "Student index number must be exactly 6 digits."
-        else:
-            idx = ""
         if not agreed:
             return "You must agree to the data processing terms."
 
@@ -909,7 +925,7 @@ class AppController:
             password=password,
             display_name=username,
             is_pw_affiliated=affiliated,
-            student_id_number=idx if affiliated else None,
+            student_id_number=idx if idx else None,
             consent_given=agreed,
         )
         if result.is_offline:

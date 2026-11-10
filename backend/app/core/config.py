@@ -19,6 +19,7 @@ The ``.env`` file is excluded from version control via ``.gitignore``.
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
 
@@ -105,7 +106,7 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(
         hide_input_in_errors=True,
-        env_file=".env",
+        env_file=(".env", str(Path(__file__).resolve().parents[2] / ".env")),
         env_file_encoding="utf-8",
         # Unknown variables in .env are silently ignored so that a shared
         # .env used by both the desktop app and the backend does not cause
