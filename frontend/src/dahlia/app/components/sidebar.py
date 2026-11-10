@@ -9,6 +9,13 @@ from nicegui import ui
 from dahlia.services.config import APP_VERSION
 
 
+def _format_status_badge(is_online: bool) -> str:
+    """Format connection status badge HTML."""
+    if is_online:
+        return '<span class="dahlia-status-badge dahlia-status-online">Online</span>'
+    return '<span class="dahlia-status-badge dahlia-status-offline">Offline mode</span>'
+
+
 def render_sidebar(controller: Any, active: str) -> None:
     """Render the left sidebar with brand, navigation and connection status.
 
@@ -27,12 +34,11 @@ def render_sidebar(controller: Any, active: str) -> None:
             with ui.row().classes("items-baseline gap-2"):
                 ui.label("DAHLIA").classes("dahlia-brand")
                 ui.label(APP_VERSION).classes("dahlia-version")
-            ui.html(
-                '<span class="dahlia-status-badge dahlia-status-offline">'
-                "Offline mode"
-                "</span>",
-                sanitize=False,
-            )
+            is_online = bool(getattr(controller, "is_online", False))
+            status_badge = ui.html(_format_status_badge(is_online), sanitize=False)
+            controller._status_badge = status_badge
+
+
 
         # Main navigation
         with ui.column().classes("dahlia-sidebar-nav gap-0"):
@@ -48,6 +54,13 @@ def render_sidebar(controller: Any, active: str) -> None:
                 is_active=(active == "my_results"),
                 on_click=controller.show_my_results,
             )
+            if controller.current_user and controller.current_user.get("role") == "DEVELOPER":
+                _nav_item(
+                    icon="admin_panel_settings",
+                    label="Admin Panel",
+                    is_active=(active == "admin"),
+                    on_click=controller.show_admin,
+                )
 
         # Profile
         with ui.column().classes("dahlia-sidebar-bottom gap-0"):

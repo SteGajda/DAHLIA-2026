@@ -1,132 +1,115 @@
-# DAHLIA 1.1 — desktop PoC
+# DAHLIA 2026 — Architektura Klient-Serwer
 
-DAHLIA 1.1 jest desktopową aplikacją do eksperymentów human-in-the-loop związanych z imputacją brakujących wartości. Interfejs jest w całości po angielsku. Aplikacja działa lokalnie, nie zapisuje wyników i nie łączy się z żadną usługą sieciową.
+DAHLIA to interaktywne narzędzie do powtarzalnych eksperymentów "human-in-the-loop" związanych z imputacją brakujących wartości w zbiorach danych. 
+Projekt przeszedł transformację z izolowanego desktopowego Proof of Concept (PoC) do pełnoprawnej architektury Klient-Serwer (Monorepo), zachowując przy tym tryb offline-first.
 
-## Zakres MVP
+## Architektura (Monorepo)
 
-Aplikacja zawiera ekrany:
+Repozytorium składa się z dwóch niezależnych, odizolowanych modułów. Każdy z nich zarządza własnymi zależnościami (`pyproject.toml`):
 
-1. `Experiment Setup`
-2. `Active Experiment`
-3. `Results Summary`
-4. `My Results` (lokalne wyniki i eksport CSV)
-5. `Profile` / `Login` / `Register`
+### 1. `backend/` (Serwer REST API)
+- **Technologia:** FastAPI (Python 3.12), SQLAlchemy 2.0, Pydantic, Alembic.
+- **Rola:** Centralny serwer odbierający i agregujący wyniki eksperymentów od badaczy z różnych stacji roboczych.
+- **Bezpieczeństwo:** Posiada zaimplementowany system kont, bezstanową autoryzację JWT (krótkotrwałe Access Tokeny oraz haszowane SHA-256 Refresh Tokeny) oraz system kontroli ról (RBAC: `USER`, `USER_PLUS`, `RESEARCHER`, `DEVELOPER`).
+- **Baza danych:** Docelowo Microsoft SQL Server / Azure SQL (lokalnie wykorzystuje SQLite na potrzeby developmentu i testów).
 
-W MVP dostępny jest zbiór `iris`, frakcje braków `0.1`, `0.2`, `0.3` oraz projekcje `tsne`, `pca`, `umap`.
+### 2. `frontend/` (Klient Desktopowy)
+- **Technologia:** NiceGUI, Plotly, Scikit-learn, HTTPX, Keyring.
+- **Rola:** Aplikacja kliencka, w której badacze przeprowadzają eksperyment (wskazują poprawne pozycje na wykresach PCA/t-SNE/UMAP).
+- **Offline-first:** Aplikacja pozwala na ukończenie badania bez dostępu do sieci. Wyniki zapisują się w lokalnej bazie danych SQLite (`%APPDATA%/DAHLIA/dahlia_local.db` na Windows).
+- **Bezpieczeństwo Sesji:** Długoterminowy Refresh Token przechowywany jest w bezpiecznym magazynie poświadczeń systemu operacyjnego (`keyring` - Windows Credential Manager / macOS Keychain), bez zapisywania poufnych haseł w plikach konfiguracyjnych.
+- **Synchronizacja i Status:** Interfejs zawiera dynamiczny wskaźnik stanu sieci (Online / Offline) odpytujący endpoint `/health`. Przy aktywnej sesji użytkownika wyniki mogą zostać przesłane do centralnej bazy backendowej.
 
-## Struktura
+---
 
-```text
-data/
-  iris.csv                     dane wejściowe
-scripts/
-  run_windows.ps1              uruchomienie z kodu
-  build_windows.ps1            budowa pliku EXE
-src/dahlia/
-  app/
-    components/
-      branding.py              logotyp i wersja
-      chart.py                 wykres Plotly eksperymentu
-      layout.py                helper układu z sidebar
-      sidebar.py               nawigacja boczna
-    screens/
-      setup.py                 konfiguracja eksperymentu
-      experiment.py            aktywny eksperyment
-      results.py               podsumowanie wyników
-      my_results.py            lokalne wyniki i eksport
-      profile.py               profil, logowanie, rejestracja
-    controller.py              stan i nawigacja między ekranami
-    main.py                    natywne okno desktopowe
-    theme.py                   styl zgodny z konceptem w Figmie
-  datasets/
-    na_generator.py            deterministyczny wybór braków i punktów
-  imputation/                  metody imputacji
-  services/
-    config.py                  stałe datasetu i eksperymentu
-    data.py                    wczytywanie oraz walidacja CSV
-    projection.py              projekcje PCA, t-SNE i UMAP
-    experiment.py              przygotowanie, metody i metryki
-tests/                         testy logiki naukowej
-run_app.py                     główny plik uruchomieniowy
-```
+## Praca z Repozytorium (Instalacja)
 
-Warstwa `app` nie implementuje algorytmów naukowych. UI korzysta wyłącznie z funkcji z `services`, a istniejące klasy imputacji pozostają w `imputation`.
+Zalecane jest korzystanie z jednego, wspólnego środowiska wirtualnego w korzeniu projektu, do którego doinstalowuje się zależności obu modułów w trybie edytowalnym.
 
-## Instalacja w VS Code
-
-W terminalu PowerShell, w katalogu projektu:
-
+**Instalacja:**
 ```powershell
+# 1. Utworzenie i aktywacja wspólnego środowiska w katalogu głównym:
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install -e ".[dev]"
+
+# 2. Instalacja zależności frontendu (z folderu frontend):
+cd frontend
+pip install -e .[dev]
+cd ..
+
+# 3. Instalacja zależności backendu (z folderu backend):
+cd backend
+pip install -e .[dev]
+cd ..
 ```
 
-Zalecany Python: **3.12**.
+**Uruchamianie aplikacji:**
+Wymaga osobnych okien terminala z aktywnym środowiskiem `.venv`:
+```powershell
+# Backend (API REST pod adresem http://127.0.0.1:8000, dokumentacja Swagger pod /docs):
+cd backend
+fastapi dev app/main.py
+# lub bezpośrednio uvicorn:
+# uvicorn app.main:app --reload --port 8000
 
-## Uruchomienie
+# Frontend (domyślnie pełnoekranowe, natywne okno desktopowe):
+python frontend/run_app.py
+# Opcjonalnie w oknie zwykłej przeglądarki (port 8080):
+# python frontend/run_app.py --browser
+```
+
+---
+
+## Uruchamianie Testów (pytest)
+
+Zarówno frontend, jak i backend posiadają kompletne zestawy testów jednostkowych:
 
 ```powershell
-python run_app.py
+# Uruchomienie testów frontendu (32 testy: API client, sesja, admin panel, algorytmy):
+pytest frontend/tests
+
+# Uruchomienie testów backendu (70 testów: JWT, autentykacja, RBAC, rejestracja):
+cd backend
+pytest tests
+cd ..
 ```
 
-Można też uruchomić:
+---
 
-```powershell
-.\scripts\run_windows.ps1
-```
+## Ekrany Aplikacji (Frontend)
+Interfejs kliencki zawiera następujące widoki:
+1. `Experiment Setup` - konfiguracja parametrów imputacji (seed, ułamek braków, metoda projekcji).
+2. `Active Experiment` - główny widok interaktywnego wykresu i suwaków annotatora.
+3. `Results Summary` - podsumowanie metryk MAE/RMSE w porównaniu z metodami bazowymi.
+4. `My Results` - lokalne wyniki pobrane z bazy SQLite z możliwością eksportu do CSV.
+5. `Profile` / `Login` / `Register` - logowanie badacza, rejestracja (z weryfikacją numeru indeksu PW), odświeżanie tokena i wnioskowanie o wyższą rolę.
+6. `Admin Panel` - panel moderacji wniosków o podniesienie ról (`USER_PLUS`, `RESEARCHER`) oraz przełączania aktywności kont użytkowników (dostępny w menu bocznym wyłącznie dla roli `DEVELOPER`).
 
-Aplikacja otwiera się jako jasne, pełnoekranowe, niezmienialne okno desktopowe.
+---
 
-## Testy
+## Budowanie pliku EXE (Tylko Windows)
 
-```powershell
-pytest
-```
-
-Testy sprawdzają między innymi:
-
-- deterministyczny wybór braków i kolejności 15 punktów,
-- brak użycia `SepalLengthCm`, `Species` i `Id` w projekcji,
-- stabilność projekcji PCA dla tego samego seedu,
-- zakres suwaka wyznaczany tylko z obserwowanych wartości,
-- wyniki wszystkich sześciu metod,
-- obliczanie MAE i RMSE na tych samych 15 punktach.
-
-## Budowanie pliku EXE
-
-Na Windows uruchom:
+Aplikację desktopową można skompilować do jednego, samodzielnego pliku wykonywalnego (bez konieczności posiadania Pythona przez użytkownika końcowego). W folderze `frontend/` wykonaj:
 
 ```powershell
 .\scripts\build_windows.ps1
 ```
-
-Skrypt instaluje zależności budowania i wykonuje:
-
+Skrypt wywoła narzędzie `nicegui-pack`:
 ```powershell
-nicegui-pack --onefile --windowed --name "DAHLIA-1.1" --add-data "data;data" run_app.py
+nicegui-pack --clean --noconfirm --onefile --windowed --name "DAHLIA-1.1" --add-data "data;data" run_app.py
 ```
+Gotowy plik `DAHLIA-1.1.exe` znajdzie się w katalogu `frontend/dist/`.
 
-Gotowy plik powinien znaleźć się w:
+---
 
-```text
-dist/DAHLIA-1.1.exe
-```
+## Najważniejsze reguły eksperymentu (Silnik naukowy)
 
-Budowanie `.exe` należy wykonywać na Windows. Pozostałe systemy są traktowane jako przyszłe rozszerzenie.
-
-## Najważniejsze reguły eksperymentu
-
-- Seed: `0–4294967295`.
-- Zawsze 15 ocen użytkownika.
-- Braki powstają tylko w `SepalLengthCm`.
-- Projekcja wykorzystuje tylko `SepalWidthCm`, `PetalLengthCm`, `PetalWidthCm`.
-- Inne brakujące punkty są ukryte; widoczny jest tylko aktualny punkt.
-- Po zatwierdzeniu punkt znika z wykresu.
-- Wartość początkowa to minimum skali.
-- Suwak, pole liczbowe i kolor punktu mają jedno wspólne źródło wartości.
-- Metody działają w tle podczas anotacji.
-- Błąd którejkolwiek metody przerywa eksperyment.
-- Wyniki są zapisywane lokalnie po zakończeniu eksperymentu (tylko na czas aktywnej sesji) i mogą być
-  wyeksportowane do pliku CSV (metryki lub odpowiedzi annotatora).
+- **Seed**: `0–4294967295`. Gwarantuje determinizm (identyczny układ braków dla tego samego ziarna).
+- Zawsze 15 ocen użytkownika per eksperyment.
+- Braki powstają tylko w kolumnie `SepalLengthCm`.
+- Projekcja (PCA, t-SNE, UMAP) wykorzystuje wyłącznie kolumny referencyjne: `SepalWidthCm`, `PetalLengthCm`, `PetalWidthCm`.
+- Inne brakujące punkty są ukryte na wykresie; widoczny i podświetlony jest tylko aktualnie rozpatrywany punkt.
+- Wartość początkowa suwaka to zawsze minimum skali.
+- Suwak, pole liczbowe i kolor punktu na wykresie są reaktywne (mają jedno, zsynchronizowane źródło wartości).
+- Metody bazowe (KNN, Random Forest, MICE itp.) liczą się w tle w innej usłudze, nie blokując interfejsu annotatora.
+- Zakończenie badania zapisuje wynik w lokalnej bazie SQLite. Wysłanie danych do centralnej bazy wymaga zatwierdzenia.

@@ -73,7 +73,7 @@ logger = logging.getLogger(__name__)
 # Users may only request a role strictly higher than their current one and no
 # higher than RESEARCHER (DEVELOPER is not self-requestable).
 _UPGRADEABLE_TO: dict[str, set[str]] = {
-    "USER": {"USER_PLUS", "RESEARCHER"},
+    "USER": {"USER_PLUS"},
     "USER_PLUS": {"RESEARCHER"},
     "RESEARCHER": set(),
     "DEVELOPER": set(),

@@ -83,12 +83,52 @@ def render_my_results(controller: Any) -> None:
 
                 ui.space()
 
+                async def _on_upload_click() -> None:
+                    if not controller.current_user:
+                        ui.notify(
+                            "Log in to upload your experiments to the database.",
+                            type="warning",
+                        )
+                        return
+                    if not controller.is_online:
+                        ui.notify(
+                            "Cannot upload while offline. Connect to the internet first.",
+                            type="warning",
+                        )
+                        return
+                    if not controller.current_user.get("is_email_verified", False):
+                        ui.notify(
+                            "Please verify your email address before uploading experiments.",
+                            type="warning",
+                        )
+                        return
+
+                    synced, failed = await controller.sync_local_experiments()
+                    if synced > 0 and failed == 0:
+                        ui.notify(
+                            f"Successfully uploaded {synced} experiment(s)!",
+                            type="positive",
+                        )
+                    elif synced > 0 and failed > 0:
+                        ui.notify(
+                            f"Uploaded {synced} experiment(s), {failed} failed.",
+                            type="warning",
+                        )
+                    elif failed > 0:
+                        ui.notify(
+                            f"Upload failed for {failed} experiment(s).",
+                            type="negative",
+                        )
+                    else:
+                        ui.notify(
+                            "All local experiments are already synced.",
+                            type="info",
+                        )
+                    controller.show_my_results()
+
                 ui.button(
                     "↑  Upload to database",
-                    on_click=lambda: ui.notify(
-                        "Database upload is not yet implemented in this version.",
-                        type="info",
-                    ),
+                    on_click=_on_upload_click,
                 ).props("outline no-caps").classes("dahlia-secondary-btn")
 
             # Experiments table or empty state

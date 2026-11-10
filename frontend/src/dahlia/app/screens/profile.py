@@ -72,9 +72,10 @@ def render_login(controller: Any, error: str | None = None) -> None:
                 error_label = ui.label("").classes("text-xs text-red-700 mt-2")
                 error_label.set_visibility(False)
 
-                def do_login() -> None:
-                    msg = controller.mock_login(
-                        email_input.value, password_input.value
+                async def do_login() -> None:
+                    error_label.set_visibility(False)
+                    msg = await controller.do_login(
+                        email_input.value or "", password_input.value or ""
                     )
                     if msg:
                         error_label.set_text(msg)
@@ -156,9 +157,8 @@ def render_register(controller: Any, error: str | None = None) -> None:
                 error_label = ui.label("").classes("text-xs text-red-700 mt-2")
                 error_label.set_visibility(False)
 
-                register_btn = ui.button(
-                    "Register",
-                    on_click=lambda: _do_register(
+                async def submit_register() -> None:
+                    await _do_register(
                         controller,
                         email_input,
                         username_input,
@@ -167,7 +167,11 @@ def render_register(controller: Any, error: str | None = None) -> None:
                         index_input,
                         consent_check,
                         error_label,
-                    ),
+                    )
+
+                register_btn = ui.button(
+                    "Register",
+                    on_click=submit_register,
                 ).classes("dahlia-primary-btn w-full mt-3")
                 register_btn.disable()
 
@@ -189,6 +193,15 @@ def render_profile_view(controller: Any) -> None:
     user = controller.current_user
     assert user is not None
     local_count = len(controller.local_experiments)
+    role_code = str(user.get("role", "USER")).upper()
+    role_labels = {
+        "USER": "User",
+        "USER_PLUS": "User+",
+        "RESEARCHER": "Researcher",
+        "DEVELOPER": "Developer",
+    }
+    role_display = role_labels.get(role_code, role_code)
+    sync_status = "Online" if getattr(controller, "is_online", False) else "Offline mode"
 
     with sidebar_page(controller, "profile", "Profile"):
         with ui.element("main").classes("dahlia-setup-main"):
@@ -198,22 +211,47 @@ def render_profile_view(controller: Any) -> None:
                 with ui.column().classes("w-full gap-3 mb-6"):
                     _info_row("Email", user["email"])
                     _info_row("Username", user["username"])
-                    _info_row("Role", user.get("role", "User"))
+                    _info_row("Role", role_display)
                     if user.get("affiliated"):
                         _info_row(
                             "WUT affiliation",
                             f"Yes — index: {user.get('index_no') or '–'}",
                         )
                     _info_row("Local experiments", str(local_count))
-                    _info_row("Sync status", "Offline mode")
+                    _info_row("Sync status", sync_status)
 
-                ui.button(
-                    "Request higher role",
-                    on_click=lambda: ui.notify(
-                        "Role requests are not yet supported in this version.",
-                        type="info",
-                    ),
-                ).props("outline no-caps").classes("dahlia-secondary-btn w-full mb-3")
+                # Upgrade options strictly one level higher:
+                # USER -> USER_PLUS, USER_PLUS -> RESEARCHER
+                if role_code == "USER":
+                    async def on_request_user_plus() -> None:
+                        ok, msg = await controller.request_role("USER_PLUS")
+                        ui.notify(
+                            msg,
+                            type="positive" if ok else "warning",
+                            timeout=4000,
+                        )
+
+                    ui.button(
+                        "Request USER+ role",
+                        on_click=on_request_user_plus,
+                    ).props("outline no-caps").classes(
+                        "dahlia-secondary-btn w-full mb-3"
+                    )
+                elif role_code == "USER_PLUS":
+                    async def on_request_researcher() -> None:
+                        ok, msg = await controller.request_role("RESEARCHER")
+                        ui.notify(
+                            msg,
+                            type="positive" if ok else "warning",
+                            timeout=4000,
+                        )
+
+                    ui.button(
+                        "Request RESEARCHER role",
+                        on_click=on_request_researcher,
+                    ).props("outline no-caps").classes(
+                        "dahlia-secondary-btn w-full mb-3"
+                    )
 
                 ui.button(
                     "Log out",
@@ -223,7 +261,7 @@ def render_profile_view(controller: Any) -> None:
 
 # Private helpers
 
-def _do_register(
+async def _do_register(
     controller: Any,
     email_input: Any,
     username_input: Any,
@@ -233,11 +271,12 @@ def _do_register(
     consent_check: Any,
     error_label: Any,
 ) -> None:
-    """Validate and submit the registration form."""
-    msg = controller.mock_register(
-        email=email_input.value,
-        username=username_input.value,
-        password=password_input.value,
+    """Validate and submit the registration form to the backend."""
+    error_label.set_visibility(False)
+    msg = await controller.do_register(
+        email=str(email_input.value or ""),
+        username=str(username_input.value or ""),
+        password=str(password_input.value or ""),
         affiliated=bool(affiliation_check.value),
         index_no=str(index_input.value or ""),
         agreed=bool(consent_check.value),
@@ -247,11 +286,11 @@ def _do_register(
         error_label.set_visibility(True)
     else:
         ui.notify(
-            "Registration submitted. Please verify your email before logging in.",
+            "Account created successfully. Check server logs for activation token.",
             type="positive",
             timeout=5000,
         )
-        controller.show_profile()
+        controller.show_login()
 
 
 def _info_row(label: str, value: str) -> None:

@@ -20,6 +20,7 @@ from .experiment import (
     snap_value,
     start_algorithm_predictions,
 )
+from .local_storage import LocalStorage
 from .projection import ProjectionError, compute_projection
 
 __all__ = [
@@ -33,6 +34,7 @@ __all__ = [
     "TOTAL_STEPS",
     "DatasetConfig",
     "DatasetValidationError",
+    "LocalStorage",
     "PreparedExperiment",
     "ProjectionError",
     "calculate_algorithm_predictions",

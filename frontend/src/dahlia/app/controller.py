@@ -13,9 +13,11 @@ from typing import Any
 import pandas as pd
 from nicegui import context, ui
 
+from dahlia.core.api_client import ApiClient
 from dahlia.app.components.chart import PLOTLY_CONFIG, build_experiment_figure
 from dahlia.app.screens.experiment import render_experiment
 from dahlia.app.screens.my_results import render_my_results
+from dahlia.app.screens.admin import render_admin
 from dahlia.app.screens.profile import (
     render_login,
     render_profile,
@@ -27,6 +29,7 @@ from dahlia.app.screens.setup import render_setup
 from dahlia.services import (
     DATASETS,
     MAX_SEED,
+    LocalStorage,
     PreparedExperiment,
     calculate_results,
     prepare_experiment,
@@ -41,8 +44,11 @@ LOGGER = logging.getLogger(__name__)
 class AppController:
     """Own all ephemeral application state; nothing is persisted to disk."""
 
-    def __init__(self, root: Any) -> None:
-        self._client = context.client
+    def __init__(self, root: Any, storage: LocalStorage | None = None) -> None:
+        try:
+            self._client = context.client
+        except Exception:
+            self._client = None
         self.root = root
         self.monitor_timer: Any | None = None
         self._syncing_prediction = False
@@ -60,10 +66,16 @@ class AppController:
 
         self.setup_elements: dict[str, Any] = {}
         self.experiment_elements: dict[str, Any] = {}
-        # Navigation and auth state
+        # Navigation and persistent storage state
         self.active_screen: str = "setup"
-        self.local_experiments: list[dict] = []
+        self.storage: LocalStorage = storage or LocalStorage()
+        self.local_experiments: list[dict] = self.storage.get_experiments()
         self.current_user: dict | None = None
+        self.api_client: ApiClient = ApiClient()
+        self.is_online: bool = False
+
+        if self._client is not None:
+            ui.timer(0.05, self.startup_check, once=True)
 
     def _stop_monitor(self) -> None:
         if self.monitor_timer is not None:
@@ -93,10 +105,11 @@ class AppController:
                 window.onbeforeunload = null;
             """
 
-        try:
-            self._client.run_javascript(javascript)
-        except RuntimeError as error:
-            LOGGER.warning("Could not update the exit guard: %s", error)
+        if self._client is not None and getattr(self._client, "has_socket_connection", False):
+            try:
+                self._client.run_javascript(javascript)
+            except Exception as error:
+                LOGGER.warning("Could not update the exit guard: %s", error)
 
     def show_setup(
         self,
@@ -419,47 +432,60 @@ class AppController:
         with self.root:
             render_register(self, error)
 
-    def logout(self) -> None:
-        """Clear the current user session and navigate to the profile landing."""
+    def show_admin(self) -> None:
+        """Navigate to the Admin Panel screen (DEVELOPER role only)."""
+        if self.current_user is None or self.current_user.get("role") != "DEVELOPER":
+            self.show_profile()
+            return
+        self.active_screen = "admin"
+        self._clear()
+        self._set_exit_guard(False)
+        with self.root:
+            render_admin(self)
+
+    async def logout(self) -> None:
+        """Clear session on backend, delete keyring token, and navigate to profile."""
+        await self.api_client.logout()
         self.current_user = None
         self.show_profile()
 
     # Local data management
 
     def _save_current_experiment(self) -> None:
-        """Append the completed experiment to the in-memory local results list.
+        """Persist completed experiment to SQLite buffer with sync_status 'Local only'.
 
         Stores both the metrics summary (``results`` DataFrame) and the raw
-        annotator answers (``answers`` dict + ``annotation_indices``) so that
-        both can be exported or synced to the database later.
+        annotator answers (``answers`` dict + ``annotation_indices``) in local SQLite
+        so that both can be exported or synced to the database later.
         """
         if self.experiment is None or self.results is None:
             return
-        self.local_experiments.append(
-            {
-                "date": datetime.now().strftime("%Y-%m-%d\u00a0 %H:%M"),
-                "dataset": self.experiment.config.name,
-                "seed": self.experiment.seed,
-                "na_fraction": self.experiment.na_fraction,
-                "projection": self.experiment.projection_name,
-                "sync_status": "Local only",
-                "results": self.results.copy(),
-                # Raw annotator answers — index (int) → imputed value (float).
-                "answers": {
-                    int(k): float(v)
-                    for k, v in self.experiment.answers.items()
-                },
-                # Ordered list of dataset indices that were annotated.
-                "annotation_indices": [
-                    int(i) for i in self.experiment.annotation_indices
-                ],
-            }
+
+        user_id = self.current_user.get("user_id") if self.current_user else None
+        answers = {int(k): float(v) for k, v in self.experiment.answers.items()}
+        annotation_indices = [int(i) for i in self.experiment.annotation_indices]
+
+        self.storage.save_experiment(
+            dataset_name=self.experiment.config.name,
+            seed=self.experiment.seed,
+            na_fraction=self.experiment.na_fraction,
+            projection=self.experiment.projection_name,
+            results_df=self.results.copy(),
+            answers=answers,
+            annotation_indices=annotation_indices,
+            user_id=user_id,
+            sync_status="Local only",
         )
+        self.local_experiments = self.storage.get_experiments()
 
     def delete_local_experiment(self, idx: int) -> None:
-        """Remove a local experiment record by index and refresh My Results."""
+        """Remove a local experiment record from SQLite and refresh My Results."""
         if 0 <= idx < len(self.local_experiments):
-            self.local_experiments.pop(idx)
+            exp = self.local_experiments[idx]
+            uid = exp.get("experiment_uid")
+            if uid:
+                self.storage.delete_experiment(uid)
+            self.local_experiments = self.storage.get_experiments()
         self.show_my_results()
 
     def reset_current_value(self) -> None:
@@ -562,13 +588,232 @@ class AppController:
             timeout=6000,
         )
 
-    # Mock authentication (PoC — no network layer yet)
+    # Authentication and session management
 
-    def mock_login(self, email: str, password: str) -> str | None:
-        """Validate credentials and set current_user (PoC stub — no network).
+    def _set_user_from_profile(self, data: dict[str, Any]) -> None:
+        """Map backend user profile dictionary to internal current_user dict."""
+        self.current_user = {
+            "user_id": data.get("user_id"),
+            "email": str(data.get("email", "")),
+            "username": str(data.get("display_name") or data.get("email", "").split("@")[0]),
+            "role": str(data.get("role_code", "USER")),
+            "affiliated": bool(data.get("is_pw_affiliated", False)),
+            "index_no": data.get("student_id_number"),
+            "is_email_verified": bool(data.get("is_email_verified", False)),
+        }
+        uid = self.current_user.get("user_id")
+        if uid is not None:
+            updated = self.storage.assign_user_to_unassigned(int(uid))
+            if updated > 0:
+                LOGGER.info("Attached %d unassigned experiments to user %s", updated, uid)
+                self.local_experiments = self.storage.get_experiments()
+
+    def _update_status_badge(self) -> None:
+        """Update connection status badge in sidebar if rendered."""
+        badge = getattr(self, "_status_badge", None)
+        if badge is not None:
+            try:
+                badge.content = (
+                    '<span class="dahlia-status-badge dahlia-status-online">Online</span>'
+                    if self.is_online
+                    else '<span class="dahlia-status-badge dahlia-status-offline">Offline mode</span>'
+                )
+            except Exception:
+                pass
+
+    async def startup_check(self) -> None:
+        """Verify API connectivity and attempt silent auto-login via stored refresh token."""
+        health = await self.api_client.check_health()
+        self.is_online = health.success
+        self._update_status_badge()
+
+        if self.is_online and self.current_user is None:
+            res = await self.api_client.auto_login()
+            if res.success and isinstance(res.data, dict):
+                self._set_user_from_profile(res.data)
+                LOGGER.info(
+                    "Silent auto-login succeeded for <%s> (role=%s)",
+                    self.current_user["email"],
+                    self.current_user["role"],
+                )
+                if self.active_screen == "profile":
+                    self.show_profile()
+
+    async def do_login(self, email: str, password: str) -> str | None:
+        """Authenticate user against the backend API.
 
         Returns an error message string on failure, or ``None`` on success.
         """
+        email = email.strip()
+        if not email:
+            return "Email is required."
+        if "@" not in email or "." not in email.split("@")[-1]:
+            return "Enter a valid email address."
+        if not password:
+            return "Password is required."
+
+        result = await self.api_client.login(email, password)
+        if result.is_offline:
+            self.is_online = False
+            return "Cannot connect to server. Running in offline mode."
+
+        if not result.success:
+            self.is_online = True
+            return result.error or "Login failed."
+
+        self.is_online = True
+        me_res = await self.api_client.get_me()
+        if me_res.success and isinstance(me_res.data, dict):
+            self._set_user_from_profile(me_res.data)
+        else:
+            role = self.api_client.get_current_role() or "USER"
+            claims = (
+                self.api_client.decode_token_payload(self.api_client.access_token)
+                if self.api_client.access_token
+                else None
+            )
+            user_id = int(claims["sub"]) if claims and "sub" in claims else None
+            self.current_user = {
+                "user_id": user_id,
+                "email": email,
+                "username": email.split("@")[0],
+                "role": role,
+                "affiliated": False,
+                "index_no": None,
+                "is_email_verified": False,
+            }
+            if user_id is not None:
+                updated = self.storage.assign_user_to_unassigned(user_id)
+                if updated > 0:
+                    self.local_experiments = self.storage.get_experiments()
+        return None
+
+    async def sync_local_experiments(self) -> tuple[int, int]:
+        """Upload unsynced local experiments to the central backend database.
+
+        Returns
+        -------
+        tuple[int, int]
+            (synced_count, failed_count)
+        """
+        if not self.is_online or self.current_user is None:
+            return 0, 0
+
+        unsynced = self.storage.get_unsynced_experiments()
+        if not unsynced:
+            return 0, 0
+
+        synced_count = 0
+        failed_count = 0
+        for exp in unsynced:
+            uid = exp["experiment_uid"]
+            payload = dict(exp.get("payload", {}))
+            payload["experiment_uid"] = uid
+            payload["user_id"] = self.current_user.get("user_id")
+
+            self.storage.update_sync_status(uid, "Sync pending")
+            res = await self.api_client.sync_experiment(payload)
+            if res.success or res.status_code in (200, 201, 409):
+                # 201 Created or 409 Conflict (idempotency: already exists on server)
+                self.storage.update_sync_status(uid, "Synced")
+                synced_count += 1
+            else:
+                self.storage.update_sync_status(uid, "Sync failed")
+                failed_count += 1
+
+        self.local_experiments = self.storage.get_experiments()
+        return synced_count, failed_count
+
+    async def do_register(
+        self,
+        email: str,
+        username: str,
+        password: str,
+        affiliated: bool,
+        index_no: str,
+        agreed: bool,
+    ) -> str | None:
+        """Register a new user account via the backend API.
+
+        Returns an error message string on failure, or ``None`` on success.
+        """
+        email = email.strip()
+        username = username.strip()
+        if not email:
+            return "Email is required."
+        if "@" not in email or "." not in email.split("@")[-1]:
+            return "Enter a valid email address."
+        if not username:
+            return "Username is required."
+        if not password:
+            return "Password is required."
+        if len(password) < 8:
+            return "Password must be at least 8 characters long."
+        if affiliated:
+            idx = index_no.strip()
+            if not idx:
+                return "Student index number is required."
+            if not (idx.isdigit() and len(idx) == 6):
+                return "Student index number must be exactly 6 digits."
+        else:
+            idx = ""
+        if not agreed:
+            return "You must agree to the data processing terms."
+
+        result = await self.api_client.register(
+            email=email,
+            password=password,
+            display_name=username,
+            is_pw_affiliated=affiliated,
+            student_id_number=idx if affiliated else None,
+            consent_given=agreed,
+        )
+        if result.is_offline:
+            self.is_online = False
+            return "Cannot connect to server. Registration requires an internet connection."
+
+        if not result.success:
+            self.is_online = True
+            return result.error or "Registration failed."
+
+        self.is_online = True
+        return None
+
+    async def request_role(
+        self, requested_role: str = "RESEARCHER"
+    ) -> tuple[bool, str]:
+        """Submit a role-upgrade request for the authenticated user.
+
+        Parameters
+        ----------
+        requested_role:
+            Role code to request (``"RESEARCHER"`` or ``"USER_PLUS"``).
+
+        Returns
+        -------
+        tuple[bool, str]
+            Tuple of (success_flag, feedback_message).
+        """
+        if self.current_user is None:
+            return False, "You must be logged in to request a higher role."
+
+        result = await self.api_client.request_role(requested_role)
+        if result.is_offline:
+            self.is_online = False
+            return False, "Cannot connect to server. Running in offline mode."
+
+        if not result.success:
+            self.is_online = True
+            return False, result.error or "Could not submit role request."
+
+        self.is_online = True
+        msg = "Role upgrade request submitted successfully."
+        if isinstance(result.data, dict) and "message" in result.data:
+            msg = str(result.data["message"])
+        return True, msg
+
+    def mock_login(self, email: str, password: str) -> str | None:
+        """Validate credentials and set current_user (local fallback)."""
         email = email.strip()
         if not email:
             return "Email is required."
@@ -579,7 +824,7 @@ class AppController:
         self.current_user = {
             "email": email,
             "username": email.split("@")[0],
-            "role": "User",
+            "role": "USER",
             "affiliated": False,
             "index_no": None,
         }
@@ -594,10 +839,7 @@ class AppController:
         index_no: str,
         agreed: bool,
     ) -> str | None:
-        """Validate the registration form (PoC stub — no network request).
-
-        Returns an error message string on failure, or ``None`` on success.
-        """
+        """Validate the registration form (local fallback)."""
         email = email.strip()
         username = username.strip()
         if not email:
