@@ -7,7 +7,7 @@ from pathlib import Path
 
 MAX_SEED = 2**32 - 1
 TOTAL_STEPS = 15
-APP_VERSION = "1.1"
+APP_VERSION = "1.2.0"
 METHOD_ORDER = (
     "Annotator",
     "Mean",

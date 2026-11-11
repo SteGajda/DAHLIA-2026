@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dahlia"
-version = "1.1.0"
+version = "1.2.0"
 description = "DAHLIA: desktop application for human-in-the-loop imputation experiments."
 readme = "README.md"
 requires-python = ">=3.12,<3.14"

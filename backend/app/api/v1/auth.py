@@ -470,16 +470,14 @@ def forgot_password(
     user = db.query(AppUser).filter(AppUser.email == str(payload.email)).first()
     if user is not None and user.is_active:
         reset_token = create_password_reset_token(user.user_id)
-        logger.info(
-            "[MOCK-SMTP] Password reset token for <%s>: "
-            'POST /api/v1/auth/reset-password  body={"token": "%s", "new_password": "..."}',
-            user.email,
-            reset_token,
-        )
         try:
             send_password_reset_email(user.email, reset_token)
-        except Exception as exc:
-            logger.warning("Could not send password reset email to %s: %s", user.email, exc)
+        except EmailDeliveryError:
+            # Keep the public response identical for all account addresses.
+            # Never log tokens, recipients, credentials or provider responses.
+            logger.warning("Password reset email could not be submitted to SMTP.")
+        else:
+            logger.info("Password reset email submitted to SMTP.")
 
     return {
         "message": "If an account with that e-mail exists, a password reset link has been sent."

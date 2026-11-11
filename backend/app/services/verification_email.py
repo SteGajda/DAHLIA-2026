@@ -15,7 +15,7 @@ from sqlalchemy import or_, update
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.core.security import create_email_verification_token
+from app.core.security import create_email_verification_token, PASSWORD_RESET_TOKEN_MINUTES
 from app.models.user import AppUser
 
 
@@ -60,9 +60,10 @@ def send_verification_email(recipient: str, token: str) -> None:
 
 
 def send_password_reset_email(recipient: str, token: str) -> None:
+    """Use the same sender and TLS settings as registration verification."""
     settings = get_settings()
     if settings.EMAIL_DELIVERY_MODE != "smtp":
-        return
+        raise EmailDeliveryError("Password reset email delivery is not configured.")
     link = (settings.PUBLIC_API_URL.rstrip("/")
             + "/api/v1/auth/reset-password#token=" + quote(token, safe=""))
     message = EmailMessage()
@@ -72,7 +73,9 @@ def send_password_reset_email(recipient: str, token: str) -> None:
     message.set_content(
         "A password reset was requested for your DAHLIA account.\n\n"
         f"Open this link to choose a new password:\n{link}\n\n"
-        "The link expires in 1 hour. If you did not request this, you can safely ignore this message.\n"
+        f"The link expires in {PASSWORD_RESET_TOKEN_MINUTES} minutes. "
+        "After resetting your password, return to the DAHLIA app and sign in.\n\n"
+        "If you did not request this message, you can ignore it.\n"
     )
     try:
         with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT,

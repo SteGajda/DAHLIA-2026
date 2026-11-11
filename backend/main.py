@@ -25,7 +25,7 @@ from app.core.config import get_settings
 from app.db.base import Base
 from app.db.session import engine
 
-# Logging — ensure INFO messages (including mock-SMTP tokens) appear in console
+# Operational logging; authentication tokens must never be logged.
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",

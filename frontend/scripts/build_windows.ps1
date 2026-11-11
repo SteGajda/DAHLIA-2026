@@ -74,6 +74,7 @@ try {
     $PackArguments = @(
         "-m", "PyInstaller", "--clean", "--noconfirm", "--onefile", "--noupx",
         "--name", $ArtifactName,
+        "--icon", (Join-Path $FrontendRoot "assets\dahlia.ico"),
         "--distpath", $DistRoot,
         "--workpath", (Join-Path $BuildRoot "work"),
         "--specpath", $BuildRoot,

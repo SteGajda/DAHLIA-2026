@@ -197,7 +197,7 @@ def render_predefined_sets(controller: Any) -> None:
                 ui.label("2D Projection Overview").classes("text-sm font-medium")
                 proj_select = ui.select(
                     list(PROJECTIONS),
-                    value="PCA",
+                    value="pca",
                     label="Projection",
                 ).props("outlined dense").classes("w-36")
 
@@ -220,7 +220,7 @@ def render_predefined_sets(controller: Any) -> None:
                             "text-xs dahlia-muted py-4"
                         )
 
-            update_chart("PCA")
+            update_chart("pca")
             proj_select.on_value_change(lambda e: update_chart(e.value))
 
             ui.label("Evaluation order").classes("text-sm font-medium mt-3")

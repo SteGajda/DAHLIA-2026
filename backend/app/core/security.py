@@ -48,6 +48,7 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 # JWT encoding / decoding — HS256
 _ALGORITHM = "HS256"
+PASSWORD_RESET_TOKEN_MINUTES = 15
 
 
 def create_access_token(user_id: int, role_code: str) -> str:
@@ -107,7 +108,7 @@ def create_password_reset_token(user_id: int) -> str:
         "sub": str(user_id),
         "purpose": "password_reset",
         "iat": now,
-        "exp": now + timedelta(minutes=15),
+        "exp": now + timedelta(minutes=PASSWORD_RESET_TOKEN_MINUTES),
     }
     return jwt.encode(payload, settings.SECRET_KEY, algorithm=_ALGORITHM)
 
